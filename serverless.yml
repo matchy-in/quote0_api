@@ -1,0 +1,128 @@
+service: quote0-api
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs18.x
+  region: us-east-1
+  stage: ${opt:stage, 'dev'}
+  memorySize: 512
+  timeout: 30
+  
+  environment:
+    NODE_ENV: ${self:provider.stage}
+    EVENTS_TABLE: ${self:service}-${self:provider.stage}-events
+    UPRN: ${env:UPRN, '310022781'}
+    QUOTE0_TEXT_API: ${env:QUOTE0_TEXT_API}
+    READING_API_URL: ${env:READING_API_URL, 'https://api.reading.gov.uk/api/collections'}
+    READING_API_TIMEOUT: ${env:READING_API_TIMEOUT, '5000'}
+    CACHE_TTL_HOURS: ${env:CACHE_TTL_HOURS, '12'}
+  
+  iam:
+    role:
+      statements:
+        # DynamoDB permissions
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+            - dynamodb:Scan
+          Resource:
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.EVENTS_TABLE}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.EVENTS_TABLE}/index/*"
+        # CloudWatch Logs permissions
+        - Effect: Allow
+          Action:
+            - logs:CreateLogGroup
+            - logs:CreateLogStream
+            - logs:PutLogEvents
+          Resource: '*'
+
+functions:
+  # GET /api/display - Quote/0 device hourly pull
+  getDisplay:
+    handler: src/lambda/handlers.getDisplay
+    description: Get current display data for Quote/0 device
+    events:
+      - httpApi:
+          path: /api/display
+          method: GET
+
+  # PUT /api/events - iPhone app creates events
+  createEvent:
+    handler: src/lambda/handlers.createEvent
+    description: Create a new event
+    events:
+      - httpApi:
+          path: /api/events
+          method: PUT
+
+  # Scheduled update - Push to Quote/0 at specific times
+  scheduledUpdate:
+    handler: src/lambda/handlers.scheduledUpdate
+    description: Scheduled update to push to Quote/0 device
+    timeout: 60
+    events:
+      # 01:10 UTC daily
+      - schedule:
+          name: ${self:service}-${self:provider.stage}-schedule-0110
+          description: Daily update at 01:10 UTC
+          rate: cron(10 1 * * ? *)
+          enabled: true
+      # 07:10 UTC daily
+      - schedule:
+          name: ${self:service}-${self:provider.stage}-schedule-0710
+          description: Daily update at 07:10 UTC
+          rate: cron(10 7 * * ? *)
+          enabled: true
+      # 12:10 UTC daily
+      - schedule:
+          name: ${self:service}-${self:provider.stage}-schedule-1210
+          description: Daily update at 12:10 UTC
+          rate: cron(10 12 * * ? *)
+          enabled: true
+      # 17:10 UTC daily
+      - schedule:
+          name: ${self:service}-${self:provider.stage}-schedule-1710
+          description: Daily update at 17:10 UTC
+          rate: cron(10 17 * * ? *)
+          enabled: true
+
+resources:
+  Resources:
+    # DynamoDB Events Table
+    EventsTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.EVENTS_TABLE}
+        BillingMode: PAY_PER_REQUEST  # On-demand pricing - no capacity planning needed
+        AttributeDefinitions:
+          - AttributeName: date
+            AttributeType: S  # String (YYYY-MM-DD format)
+          - AttributeName: id
+            AttributeType: S  # Unique event ID (UUID)
+        KeySchema:
+          - AttributeName: date
+            KeyType: HASH   # Partition key
+          - AttributeName: id
+            KeyType: RANGE  # Sort key
+        TimeToLiveSpecification:
+          Enabled: true
+          AttributeName: ttl  # Auto-delete old events after 90 days
+        Tags:
+          - Key: Environment
+            Value: ${self:provider.stage}
+          - Key: Project
+            Value: quote0-api
+
+plugins:
+  - serverless-offline
+
+custom:
+  serverless-offline:
+    httpPort: 3000
+    lambdaPort: 3002

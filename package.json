@@ -1,0 +1,33 @@
+{
+  "name": "quote0-api",
+  "version": "1.0.0",
+  "description": "Serverless microservice for Quote/0 reminder device with DynamoDB",
+  "main": "src/lambda/handlers.js",
+  "scripts": {
+    "start": "serverless offline",
+    "deploy:dev": "serverless deploy --stage dev",
+    "deploy:prod": "serverless deploy --stage prod",
+    "logs": "serverless logs --function scheduledUpdate --stage dev --tail",
+    "invoke": "serverless invoke local --function scheduledUpdate",
+    "remove:dev": "serverless remove --stage dev",
+    "remove:prod": "serverless remove --stage prod"
+  },
+  "keywords": [
+    "serverless",
+    "lambda",
+    "dynamodb",
+    "quote0",
+    "reminder"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.490.0",
+    "@aws-sdk/lib-dynamodb": "^3.490.0",
+    "axios": "^1.6.5",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "serverless-offline": "^13.3.3"
+  }
+}
