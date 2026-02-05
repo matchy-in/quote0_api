@@ -3,7 +3,7 @@
 ## Overview
 
 Quote0 API provides **one endpoint** for creating events:
-- `PUT /api/events` - iPhone app creates new events and **immediately updates Quote/0 device**
+- `POST /api/events` - iPhone app creates new events and **immediately updates Quote/0 device**
 
 > **Architecture Note**: This is a **push-only** system. The Lambda function actively pushes updates to the Quote/0 device via the official Quote/0 Text API. The Quote/0 device does NOT call this API.
 
@@ -18,7 +18,7 @@ Production:  https://{your-api-gateway-domain}/api
 
 ---
 
-## PUT /api/events
+## POST /api/events
 
 ### Description
 Creates a new event in DynamoDB and **immediately triggers a Quote/0 display update**.
@@ -33,7 +33,7 @@ Creates a new event in DynamoDB and **immediately triggers a Quote/0 display upd
 ### Request
 
 ```http
-PUT /api/events HTTP/1.1
+POST /api/events HTTP/1.1
 Host: your-api-gateway.amazonaws.com
 Content-Type: application/json
 
@@ -115,7 +115,7 @@ Content-Type: application/json
 #### cURL
 
 ```bash
-curl -X PUT https://your-api.com/api/events \
+curl -X POST https://your-api.com/api/events \
   -H "Content-Type: application/json" \
   -d '{
     "date": "2026/02/10",
@@ -128,7 +128,7 @@ curl -X PUT https://your-api.com/api/events \
 ```javascript
 const createEvent = async (date, event) => {
   const response = await fetch('https://your-api.com/api/events', {
-    method: 'PUT',
+    method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
@@ -173,7 +173,7 @@ struct EventResponse: Codable {
 func createEvent(date: String, event: String, completion: @escaping (Result<EventResponse, Error>) -> Void) {
     let url = URL(string: "https://your-api.com/api/events")!
     var request = URLRequest(url: url)
-    request.httpMethod = "PUT"
+    request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     
     let eventRequest = EventRequest(date: date, event: event)
@@ -290,7 +290,7 @@ GET https://api.reading.gov.uk/api/collections/310022781
 **Current Implementation**: No rate limiting (single household use)
 
 **Future Considerations** (if expanding to multiple users):
-- PUT /api/events: 60 requests/hour per IP
+- POST /api/events: 60 requests/hour per IP
 
 ---
 
@@ -309,9 +309,9 @@ GET https://api.reading.gov.uk/api/collections/310022781
 
 ### Manual Testing
 
-**Test PUT endpoint**:
+**Test POST endpoint**:
 ```bash
-curl -X PUT http://localhost:3000/api/events \
+curl -X POST http://localhost:3000/api/events \
   -H "Content-Type: application/json" \
   -d '{
     "date": "2026/02/10",
@@ -327,7 +327,7 @@ curl -X PUT http://localhost:3000/api/events \
 const request = require('supertest');
 const app = require('../src/app');
 
-describe('PUT /api/events', () => {
+describe('POST /api/events', () => {
   it('should create a new event and update Quote/0', async () => {
     const event = {
       date: '2026/02/10',
@@ -335,7 +335,7 @@ describe('PUT /api/events', () => {
     };
 
     const response = await request(app)
-      .put('/api/events')
+      .post('/api/events')
       .send(event)
       .expect(201)
       .expect('Content-Type', /json/);
@@ -353,7 +353,7 @@ describe('PUT /api/events', () => {
     };
 
     await request(app)
-      .put('/api/events')
+      .post('/api/events')
       .send(event)
       .expect(400);
   });
@@ -365,7 +365,7 @@ describe('PUT /api/events', () => {
     };
 
     await request(app)
-      .put('/api/events')
+      .post('/api/events')
       .send(event)
       .expect(422);
   });

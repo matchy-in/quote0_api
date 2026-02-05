@@ -1,0 +1,23 @@
+# Temporary test configuration
+# Copy this to serverless.yml for testing, then revert
+
+scheduledUpdate:
+  handler: src/lambda/handlers.scheduledUpdate
+  description: TEST - Fetch bin collections, store in DB, and push to Quote/0
+  timeout: 60
+  events:
+    # TEST SCHEDULE: Every 2 minutes
+    - schedule:
+        name: ${self:service}-${self:provider.stage}-test-every-2min
+        description: TEST - Triggers every 2 minutes for testing
+        rate: rate(2 minutes)
+        enabled: true
+        
+# IMPORTANT: Revert to production schedule after testing:
+# scheduledUpdate:
+#   events:
+#     - schedule:
+#         name: ${self:service}-${self:provider.stage}-schedule-0110
+#         description: Daily bin collection sync and Quote/0 update at 01:10 UTC
+#         rate: cron(10 1 * * ? *)
+#         enabled: true

@@ -16,6 +16,7 @@ provider:
     BIN_COLLECTION_TABLE: ${self:service}-${self:provider.stage}-bin-collection
     UPRN: ${env:UPRN, '310022781'}
     QUOTE0_TEXT_API: ${env:QUOTE0_TEXT_API, ''}
+    QUOTE0_AUTH_TOKEN: ${env:QUOTE0_AUTH_TOKEN, ''}
     READING_API_URL: ${env:READING_API_URL, 'https://api.reading.gov.uk/api/collections'}
     READING_API_TIMEOUT: ${env:READING_API_TIMEOUT, '5000'}
     CACHE_TTL_HOURS: ${env:CACHE_TTL_HOURS, '12'}
@@ -46,7 +47,18 @@ provider:
           Resource: '*'
 
 functions:
-  # PUT /api/events - iPhone app creates events and updates Quote/0
+  # Development test endpoint to manually trigger scheduled update
+  testScheduledUpdate:
+    handler: src/lambda/handlers.scheduledUpdate
+    description: Test endpoint for scheduled update (development only)
+    events:
+      - httpApi:
+          path: /test/scheduled-update
+          method: POST
+    # Only enable in dev stage
+    # Remove this function in production!
+
+  # POST /api/events - iPhone app creates events and updates Quote/0
   createEvent:
     handler: src/lambda/handlers.createEvent
     description: Create a new event and update Quote/0 display
@@ -54,7 +66,7 @@ functions:
     events:
       - httpApi:
           path: /api/events
-          method: PUT
+          method: POST
 
   # Scheduled update - Fetch bins, store in DB, and push to Quote/0
   scheduledUpdate:

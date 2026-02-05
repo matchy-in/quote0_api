@@ -6,6 +6,7 @@
 const axios = require('axios');
 
 const QUOTE0_TEXT_API = process.env.QUOTE0_TEXT_API;
+const QUOTE0_AUTH_TOKEN = process.env.QUOTE0_AUTH_TOKEN; // Bearer token for authorization
 const MAX_RETRIES = 3;
 const INITIAL_RETRY_DELAY = 1000; // 1 second
 
@@ -23,17 +24,29 @@ class Quote0ClientService {
       return;
     }
 
+    if (!QUOTE0_AUTH_TOKEN) {
+      console.warn('[Quote0Client] QUOTE0_AUTH_TOKEN not configured, skipping device update');
+      console.warn('[Quote0Client] Set QUOTE0_AUTH_TOKEN environment variable to enable');
+      return;
+    }
+
     try {
       console.log(`[Quote0Client] Sending update to device (attempt ${attempt}/${MAX_RETRIES})`);
       console.log('[Quote0Client] Endpoint:', QUOTE0_TEXT_API);
       console.log('[Quote0Client] Payload:', JSON.stringify(displayData, null, 2));
 
+      // Build headers with Bearer token
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${QUOTE0_AUTH_TOKEN}`,
+        'User-Agent': 'Quote0-API/1.0'
+      };
+
+      console.log('[Quote0Client] Using Bearer token authentication');
+
       const response = await axios.post(QUOTE0_TEXT_API, displayData, {
         timeout: 10000, // 10 second timeout
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Quote0-API/1.0'
-        }
+        headers: headers
       });
 
       console.log('[Quote0Client] ✅ Successfully updated Quote/0 display');

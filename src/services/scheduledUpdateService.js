@@ -1,10 +1,16 @@
 /**
  * Scheduled Update Service
- * Orchestrates the scheduled update process
- * Triggered by EventBridge at 01:10, 07:10, 12:10, 17:10 UTC
+ * Orchestrates the daily scheduled updates:
+ * 1. Fetch bin collections from Reading API
+ * 2. Store in DynamoDB
+ * 3. Query tomorrow's collections from database
+ * 4. Query today's events from database
+ * 5. Format display data
+ * 6. Push to Quote/0 device
  */
 
 const binCollectionService = require('./binCollectionService');
+const binCollectionDbService = require('./binCollectionDbService');
 const dynamoDbService = require('./dynamoDbService');
 const displayFormatterService = require('./displayFormatterService');
 const quote0ClientService = require('./quote0ClientService');
@@ -24,37 +30,48 @@ class ScheduledUpdateService {
     console.log('═'.repeat(80));
 
     try {
-      // Step 1: Fetch tomorrow's bin collections
+      // Step 1: Fetch bin collections from Reading API
       console.log('');
-      console.log('Step 1/4: Fetching bin collection data...');
-      const binCollections = await binCollectionService.getTomorrowCollections();
-      console.log(`✅ Step 1 complete: Found ${binCollections.length} bin collections for tomorrow`);
+      console.log('Step 1/6: Fetching bin collections from Reading API...');
+      const apiCollections = await binCollectionService.fetchBinCollections();
+      console.log(`✅ Step 1 complete: Fetched ${apiCollections.length} collections from API`);
 
-      // Step 2: Query today's events from DynamoDB
+      // Step 2: Store bin collections in DynamoDB
       console.log('');
-      console.log('Step 2/4: Querying today\'s events from DynamoDB...');
+      console.log('Step 2/6: Storing bin collections in DynamoDB...');
+      const storedCount = await binCollectionDbService.storeBinCollections(apiCollections);
+      console.log(`✅ Step 2 complete: Stored ${storedCount} bin collections in database`);
+
+      // Step 3: Query tomorrow's bin collections from database
+      console.log('');
+      console.log('Step 3/6: Querying tomorrow\'s bin collections from database...');
+      const tomorrowCollections = await binCollectionDbService.getTomorrowCollections();
+      console.log(`✅ Step 3 complete: Found ${tomorrowCollections.length} bin collections for tomorrow`);
+
+      // Step 4: Query today's events from database
+      console.log('');
+      console.log('Step 4/6: Querying today\'s events from database...');
       const today = new Date().toISOString().split('T')[0];
       const events = await dynamoDbService.getEventsByDate(today);
-      console.log(`✅ Step 2 complete: Found ${events.length} events for today (${today})`);
+      console.log(`✅ Step 4 complete: Found ${events.length} events for today (${today})`);
 
-      // Step 3: Format display data
+      // Step 5: Format display data
       console.log('');
-      console.log('Step 3/4: Formatting display data...');
-      const displayData = displayFormatterService.formatDisplay(events, binCollections);
-      console.log('✅ Step 3 complete: Display data formatted');
+      console.log('Step 5/6: Formatting display data...');
+      const displayData = displayFormatterService.formatDisplayFromDb(events, tomorrowCollections);
+      console.log('✅ Step 5 complete: Display data formatted');
       console.log('');
       console.log('Display Data Preview:');
       console.log('─'.repeat(40));
       console.log(`Title:     "${displayData.title}"`);
       console.log(`Message:   "${displayData.message.replace(/\n/g, '\\n')}"`);
-      console.log(`Signature: "${displayData.signature}"`);
       console.log('─'.repeat(40));
 
-      // Step 4: Push to Quote/0 device
+      // Step 6: Push to Quote/0 device
       console.log('');
-      console.log('Step 4/4: Pushing update to Quote/0 device...');
+      console.log('Step 6/6: Pushing update to Quote/0 device...');
       await quote0ClientService.updateDisplay(displayData);
-      console.log('✅ Step 4 complete: Update sent to Quote/0');
+      console.log('✅ Step 6 complete: Update sent to Quote/0');
 
       const duration = Date.now() - startTime;
       
@@ -71,7 +88,9 @@ class ScheduledUpdateService {
         duration,
         timestamp: new Date().toISOString(),
         metrics: {
-          binCollectionsFound: binCollections.length,
+          binCollectionsFetched: apiCollections.length,
+          binCollectionsStored: storedCount,
+          tomorrowCollections: tomorrowCollections.length,
           eventsFound: events.length,
           displayData: displayData
         }

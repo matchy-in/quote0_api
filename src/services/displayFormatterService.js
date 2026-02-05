@@ -18,17 +18,17 @@ class DisplayFormatterService {
     console.log('[DisplayFormatter] Formatting display from database objects');
     console.log(`Events: ${events.length}, Bin Collections: ${binCollections.length}`);
 
-    const title = this.formatTitle();
-    const message = this.formatMessage(events);
+    const title = this.formatTitle(); // Returns today's date in YYYY/MM/DD format
     const signature = this.formatSignatureFromDb(binCollections);
+    const message = this.formatMessage(events);
 
     console.log('[DisplayFormatter] Formatted display:');
     console.log(`  Title: "${title}"`);
-    console.log(`  Message: "${message.replace(/\n/g, '\\n')}"`);
     console.log(`  Signature: "${signature}"`);
+    console.log(`  Message: "${message.replace(/\n/g, '\\n')}"`);
 
     return {
-      refreshNow: false,
+      refreshNow: true,
       title,
       message,
       signature
@@ -143,7 +143,7 @@ class DisplayFormatterService {
     const binsText = binNames.join(', ');
     
     // Format as "collect {bins} tmr"
-    const signature = `collect ${binsText} tmr`;
+    const signature = `Collect ${binsText} tmr`;
 
     // Truncate to max length
     const truncated = signature.substring(0, MAX_LINE_LENGTH);
@@ -171,7 +171,7 @@ class DisplayFormatterService {
     const binsText = binNames.join(', ');
     
     // Format as "collect {bins} tmr"
-    const signature = `collect ${binsText} tmr`;
+    const signature = `Collect ${binsText} tmr`;
 
     // Truncate to max length
     const truncated = signature.substring(0, MAX_LINE_LENGTH);

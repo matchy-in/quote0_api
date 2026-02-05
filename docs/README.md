@@ -29,7 +29,7 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 └───────────────────────────────────────────────────────────┘
 
 ┌───────────────────────────────────────────────────────────┐
-│  PUT /api/events (iPhone app)                             │
+│  POST /api/events (iPhone app)                            │
 │  ↓                                                         │
 │  1. Insert event to DynamoDB events table                 │
 │  2. Query tomorrow's bins from DB                         │
@@ -83,7 +83,7 @@ npm run logs
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| PUT | `/api/events` | Create event and update Quote/0 (called by iPhone app) |
+| POST | `/api/events` | Create event and update Quote/0 (called by iPhone app) |
 
 **Note**: No GET endpoint - this is a push-only architecture!
 

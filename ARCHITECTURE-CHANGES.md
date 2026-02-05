@@ -70,7 +70,7 @@ Attributes:
 
 ---
 
-### 4. Enhanced PUT /api/events Endpoint
+### 4. Enhanced POST /api/events Endpoint
 
 **New Behavior**: After creating an event, **immediately updates Quote/0**
 
@@ -197,9 +197,9 @@ Attributes:
    aws dynamodb scan --table-name quote0-api-dev-bin-collection
    ```
 
-5. **Test PUT Endpoint**:
+5. **Test POST Endpoint**:
    ```bash
-   curl -X PUT https://your-api.com/api/events \
+   curl -X POST https://your-api.com/api/events \
      -H "Content-Type: application/json" \
      -d '{"date":"2026/02/10","event":"Test event"}'
    ```
@@ -245,7 +245,7 @@ Attributes:
 
 ### After (1 daily scheduled update + on-demand)
 
-- **Lambda Executions**: ~40/month (30 scheduled + ~10 PUT requests)
+- **Lambda Executions**: ~40/month (30 scheduled + ~10 POST requests)
 - **DynamoDB**: Reads/Writes for events + bin_collection tables
 - **External API Calls**: 30/month to Reading Council (75% reduction)
 
@@ -261,9 +261,9 @@ Attributes:
    aws lambda invoke --function-name quote0-api-dev-scheduledUpdate --payload '{}' response.json
    ```
 
-2. **Test PUT Endpoint**:
+2. **Test POST Endpoint**:
    ```bash
-   curl -X PUT {API_URL}/api/events \
+   curl -X POST {API_URL}/api/events \
      -H "Content-Type: application/json" \
      -d '{"date":"2026/02/10","event":"Test event"}'
    ```

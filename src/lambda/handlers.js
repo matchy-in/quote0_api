@@ -2,7 +2,7 @@
  * AWS Lambda Handlers for Quote0 API
  * 
  * Handles:
- * - PUT /api/events - iPhone app creates events and updates Quote/0
+ * - POST /api/events - iPhone app creates events and updates Quote/0
  * - Scheduled updates - EventBridge triggers at 01:10 UTC daily
  */
 
@@ -13,12 +13,12 @@ const quote0ClientService = require('../services/quote0ClientService');
 const scheduledUpdateService = require('../services/scheduledUpdateService');
 
 /**
- * PUT /api/events
+ * POST /api/events
  * Creates a new event in DynamoDB and immediately updates Quote/0 display
  */
 exports.createEvent = async (event) => {
   console.log('='.repeat(80));
-  console.log('[PUT /api/events] Request received');
+  console.log('[POST /api/events] Request received');
   console.log('='.repeat(80));
 
   try {
@@ -135,7 +135,7 @@ exports.createEvent = async (event) => {
     };
   } catch (error) {
     console.error('='.repeat(80));
-    console.error('[PUT /api/events] Error:', error.message);
+    console.error('[POST /api/events] Error:', error.message);
     console.error('Stack:', error.stack);
     console.error('='.repeat(80));
     

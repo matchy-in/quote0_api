@@ -1,0 +1,7 @@
+[
+  {
+    "Source": "aws.events",
+    "DetailType": "Scheduled Event",
+    "Detail": "{\"test\": true}"
+  }
+]
