@@ -13,8 +13,9 @@ provider:
   environment:
     NODE_ENV: ${self:provider.stage}
     EVENTS_TABLE: ${self:service}-${self:provider.stage}-events
+    BIN_COLLECTION_TABLE: ${self:service}-${self:provider.stage}-bin-collection
     UPRN: ${env:UPRN, '310022781'}
-    QUOTE0_TEXT_API: ${env:QUOTE0_TEXT_API}
+    QUOTE0_TEXT_API: ${env:QUOTE0_TEXT_API, ''}
     READING_API_URL: ${env:READING_API_URL, 'https://api.reading.gov.uk/api/collections'}
     READING_API_TIMEOUT: ${env:READING_API_TIMEOUT, '5000'}
     CACHE_TTL_HOURS: ${env:CACHE_TTL_HOURS, '12'}
@@ -34,6 +35,8 @@ provider:
           Resource:
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.EVENTS_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.EVENTS_TABLE}/index/*"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BIN_COLLECTION_TABLE}"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BIN_COLLECTION_TABLE}/index/*"
         # CloudWatch Logs permissions
         - Effect: Allow
           Action:
@@ -43,53 +46,27 @@ provider:
           Resource: '*'
 
 functions:
-  # GET /api/display - Quote/0 device hourly pull
-  getDisplay:
-    handler: src/lambda/handlers.getDisplay
-    description: Get current display data for Quote/0 device
-    events:
-      - httpApi:
-          path: /api/display
-          method: GET
-
-  # PUT /api/events - iPhone app creates events
+  # PUT /api/events - iPhone app creates events and updates Quote/0
   createEvent:
     handler: src/lambda/handlers.createEvent
-    description: Create a new event
+    description: Create a new event and update Quote/0 display
+    timeout: 60
     events:
       - httpApi:
           path: /api/events
           method: PUT
 
-  # Scheduled update - Push to Quote/0 at specific times
+  # Scheduled update - Fetch bins, store in DB, and push to Quote/0
   scheduledUpdate:
     handler: src/lambda/handlers.scheduledUpdate
-    description: Scheduled update to push to Quote/0 device
+    description: Fetch bin collections, store in DB, and push to Quote/0
     timeout: 60
     events:
       # 01:10 UTC daily
       - schedule:
           name: ${self:service}-${self:provider.stage}-schedule-0110
-          description: Daily update at 01:10 UTC
+          description: Daily bin collection sync and Quote/0 update at 01:10 UTC
           rate: cron(10 1 * * ? *)
-          enabled: true
-      # 07:10 UTC daily
-      - schedule:
-          name: ${self:service}-${self:provider.stage}-schedule-0710
-          description: Daily update at 07:10 UTC
-          rate: cron(10 7 * * ? *)
-          enabled: true
-      # 12:10 UTC daily
-      - schedule:
-          name: ${self:service}-${self:provider.stage}-schedule-1210
-          description: Daily update at 12:10 UTC
-          rate: cron(10 12 * * ? *)
-          enabled: true
-      # 17:10 UTC daily
-      - schedule:
-          name: ${self:service}-${self:provider.stage}-schedule-1710
-          description: Daily update at 17:10 UTC
-          rate: cron(10 17 * * ? *)
           enabled: true
 
 resources:
@@ -99,7 +76,7 @@ resources:
       Type: AWS::DynamoDB::Table
       Properties:
         TableName: ${self:provider.environment.EVENTS_TABLE}
-        BillingMode: PAY_PER_REQUEST  # On-demand pricing - no capacity planning needed
+        BillingMode: PAY_PER_REQUEST
         AttributeDefinitions:
           - AttributeName: date
             AttributeType: S  # String (YYYY-MM-DD format)
@@ -113,6 +90,31 @@ resources:
         TimeToLiveSpecification:
           Enabled: true
           AttributeName: ttl  # Auto-delete old events after 90 days
+        Tags:
+          - Key: Environment
+            Value: ${self:provider.stage}
+          - Key: Project
+            Value: quote0-api
+
+    # DynamoDB Bin Collection Table
+    BinCollectionTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.BIN_COLLECTION_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: date
+            AttributeType: S  # String (YYYY-MM-DD format)
+          - AttributeName: service
+            AttributeType: S  # Service type (composite key)
+        KeySchema:
+          - AttributeName: date
+            KeyType: HASH   # Partition key
+          - AttributeName: service
+            KeyType: RANGE  # Sort key
+        TimeToLiveSpecification:
+          Enabled: true
+          AttributeName: ttl  # Auto-delete old collections after 90 days
         Tags:
           - Key: Environment
             Value: ${self:provider.stage}

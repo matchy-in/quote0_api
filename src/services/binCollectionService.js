@@ -25,7 +25,59 @@ let cache = {
 
 class BinCollectionService {
   /**
-   * Fetch bin collections from Reading Council API
+   * Fetch bin collections from Reading Council API (raw data for storing)
+   * @returns {Promise<Array>} Array of raw collection objects from API
+   */
+  async fetchBinCollections() {
+    // Check cache first
+    if (this.isCacheValid()) {
+      console.log('[BinCollection] Using cached data');
+      return cache.data;
+    }
+
+    try {
+      const url = `${READING_API_URL}/${UPRN}`;
+      console.log('[BinCollection] Fetching from API:', url);
+
+      const response = await axios.get(url, {
+        timeout: READING_API_TIMEOUT,
+        headers: {
+          'Accept': 'application/json',
+          'User-Agent': 'Quote0-API/1.0'
+        }
+      });
+
+      if (!response.data.success) {
+        throw new Error(`API returned unsuccessful response: ${response.data.error_description}`);
+      }
+
+      const collections = response.data.collections;
+      console.log(`[BinCollection] Fetched ${collections.length} collections from API`);
+
+      // Update cache
+      cache = {
+        data: collections,
+        timestamp: Date.now()
+      };
+
+      return collections;
+    } catch (error) {
+      console.error('[BinCollection] API fetch failed:', error.message);
+      
+      // Fallback to cached data even if expired
+      if (cache.data) {
+        console.warn('[BinCollection] Using expired cache due to API failure');
+        return cache.data;
+      }
+      
+      // No cache available, return empty array
+      console.warn('[BinCollection] No cache available, returning empty array');
+      return [];
+    }
+  }
+
+  /**
+   * Fetch bin collections from Reading Council API (LEGACY method)
    * @returns {Promise<Array>} Array of collection objects
    */
   async fetchCollections() {

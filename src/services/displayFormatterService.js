@@ -9,9 +9,36 @@ const MAX_LINES = 3;
 
 class DisplayFormatterService {
   /**
-   * Format complete display data for Quote/0
+   * Format display data from database objects (NEW - for push architecture)
    * @param {Array} events - Array of event objects from DynamoDB
-   * @param {Array} binCollections - Array of bin collection objects
+   * @param {Array} binCollections - Array of bin collection objects from DynamoDB
+   * @returns {Object} Formatted display object for Quote/0
+   */
+  formatDisplayFromDb(events, binCollections) {
+    console.log('[DisplayFormatter] Formatting display from database objects');
+    console.log(`Events: ${events.length}, Bin Collections: ${binCollections.length}`);
+
+    const title = this.formatTitle();
+    const message = this.formatMessage(events);
+    const signature = this.formatSignatureFromDb(binCollections);
+
+    console.log('[DisplayFormatter] Formatted display:');
+    console.log(`  Title: "${title}"`);
+    console.log(`  Message: "${message.replace(/\n/g, '\\n')}"`);
+    console.log(`  Signature: "${signature}"`);
+
+    return {
+      refreshNow: false,
+      title,
+      message,
+      signature
+    };
+  }
+
+  /**
+   * Format complete display data for Quote/0 (LEGACY - for API responses)
+   * @param {Array} events - Array of event objects from DynamoDB
+   * @param {Array} binCollections - Array of bin collection objects (with friendly names)
    * @returns {Object} Formatted display object
    */
   formatDisplay(events, binCollections) {
@@ -90,8 +117,45 @@ class DisplayFormatterService {
   }
 
   /**
-   * Format signature for bin collection reminder
-   * @param {Array} binCollections - Array of bin collection objects
+   * Format signature from database bin collections (NEW - for push architecture)
+   * @param {Array} binCollections - Array of bin collection objects from DynamoDB
+   * @returns {string} Formatted signature (max 29 chars)
+   */
+  formatSignatureFromDb(binCollections) {
+    if (!binCollections || binCollections.length === 0) {
+      console.log('[DisplayFormatter] No bin collections for tomorrow');
+      return '';
+    }
+
+    // Service name mapping
+    const SERVICE_MAPPING = {
+      'Domestic Waste Collection Service': 'Grey bin',
+      'Recycling Collection Service': 'Red bin',
+      'Food Waste Collection Service': 'Food waste'
+    };
+
+    // Map service names to friendly bin types
+    const binNames = binCollections
+      .map(bc => SERVICE_MAPPING[bc.service] || bc.service)
+      .filter((value, index, self) => self.indexOf(value) === index); // unique
+    
+    // Join with comma
+    const binsText = binNames.join(', ');
+    
+    // Format as "collect {bins} tmr"
+    const signature = `collect ${binsText} tmr`;
+
+    // Truncate to max length
+    const truncated = signature.substring(0, MAX_LINE_LENGTH);
+    
+    console.log(`[DisplayFormatter] Signature: "${truncated}"`);
+    
+    return truncated;
+  }
+
+  /**
+   * Format signature for bin collection reminder (LEGACY - for API responses)
+   * @param {Array} binCollections - Array of bin collection objects (with friendly names)
    * @returns {string} Formatted signature (max 29 chars)
    */
   formatSignature(binCollections) {
@@ -100,7 +164,7 @@ class DisplayFormatterService {
       return '';
     }
 
-    // Extract bin names
+    // Extract bin names (already mapped to friendly names)
     const binNames = binCollections.map(bc => bc.service);
     
     // Join with comma

@@ -2,72 +2,19 @@
  * AWS Lambda Handlers for Quote0 API
  * 
  * Handles:
- * - GET /api/display - Quote/0 device pulls display data
- * - PUT /api/events - iPhone app creates events
- * - Scheduled updates - EventBridge triggers at 01:10, 07:10, 12:10, 17:10
+ * - PUT /api/events - iPhone app creates events and updates Quote/0
+ * - Scheduled updates - EventBridge triggers at 01:10 UTC daily
  */
 
-const binCollectionService = require('../services/binCollectionService');
+const binCollectionDbService = require('../services/binCollectionDbService');
 const dynamoDbService = require('../services/dynamoDbService');
 const displayFormatterService = require('../services/displayFormatterService');
 const quote0ClientService = require('../services/quote0ClientService');
 const scheduledUpdateService = require('../services/scheduledUpdateService');
 
 /**
- * GET /api/display
- * Returns formatted display data for Quote/0 device
- */
-exports.getDisplay = async (event) => {
-  console.log('='.repeat(80));
-  console.log('[GET /api/display] Request received');
-  console.log('Event:', JSON.stringify(event, null, 2));
-  console.log('='.repeat(80));
-
-  try {
-    // Fetch tomorrow's bin collections
-    const binCollections = await binCollectionService.getTomorrowCollections();
-    console.log(`Found ${binCollections.length} bin collections for tomorrow`);
-
-    // Query today's events from DynamoDB
-    const today = new Date().toISOString().split('T')[0];
-    const events = await dynamoDbService.getEventsByDate(today);
-    console.log(`Found ${events.length} events for today (${today})`);
-
-    // Format display data
-    const displayData = displayFormatterService.formatDisplay(events, binCollections);
-    console.log('Display data:', JSON.stringify(displayData, null, 2));
-
-    return {
-      statusCode: 200,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      },
-      body: JSON.stringify(displayData)
-    };
-  } catch (error) {
-    console.error('='.repeat(80));
-    console.error('[GET /api/display] Error:', error.message);
-    console.error('Stack:', error.stack);
-    console.error('='.repeat(80));
-    
-    return {
-      statusCode: 500,
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      },
-      body: JSON.stringify({
-        error: 'Internal server error',
-        message: error.message
-      })
-    };
-  }
-};
-
-/**
  * PUT /api/events
- * Creates a new event in DynamoDB
+ * Creates a new event in DynamoDB and immediately updates Quote/0 display
  */
 exports.createEvent = async (event) => {
   console.log('='.repeat(80));
@@ -144,9 +91,36 @@ exports.createEvent = async (event) => {
       };
     }
 
-    // Create event in DynamoDB
+    // Step 1: Create event in DynamoDB
     const createdEvent = await dynamoDbService.createEvent(normalizedDate, eventText);
     console.log('Event created successfully:', createdEvent);
+
+    // Step 2-6: Immediately update Quote/0 display (run steps 3-7 from scheduled service)
+    console.log('');
+    console.log('Triggering Quote/0 update after event creation...');
+    
+    try {
+      // Step 3: Query tomorrow's bin collections from database
+      const binCollections = await binCollectionDbService.getTomorrowCollections();
+      console.log(`Found ${binCollections.length} bin collections for tomorrow`);
+
+      // Step 4: Query today's events
+      const today = new Date().toISOString().split('T')[0];
+      const events = await dynamoDbService.getEventsByDate(today);
+      console.log(`Found ${events.length} events for today`);
+
+      // Step 5: Format display data
+      const displayData = displayFormatterService.formatDisplayFromDb(events, binCollections);
+      console.log('Display data formatted');
+
+      // Step 6: Push to Quote/0
+      await quote0ClientService.updateDisplay(displayData);
+      console.log('Quote/0 updated successfully');
+    } catch (updateError) {
+      console.error('Error updating Quote/0:', updateError.message);
+      // Don't fail the request if Quote/0 update fails
+      console.log('Event was created but Quote/0 update failed');
+    }
 
     return {
       statusCode: 201,
@@ -154,7 +128,10 @@ exports.createEvent = async (event) => {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
-      body: JSON.stringify(createdEvent)
+      body: JSON.stringify({
+        ...createdEvent,
+        quote0_updated: true
+      })
     };
   } catch (error) {
     console.error('='.repeat(80));
