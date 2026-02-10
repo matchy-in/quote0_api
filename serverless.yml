@@ -68,6 +68,16 @@ functions:
           path: /api/events
           method: POST
 
+  # POST /api/events/batch - Create multiple events at once and update Quote/0
+  createEventsBatch:
+    handler: src/lambda/handlers.createEventsBatch
+    description: Create multiple events in batch and update Quote/0 display
+    timeout: 90
+    events:
+      - httpApi:
+          path: /api/events/batch
+          method: POST
+
   # Scheduled update - Fetch bins, store in DB, and push to Quote/0
   scheduledUpdate:
     handler: src/lambda/handlers.scheduledUpdate

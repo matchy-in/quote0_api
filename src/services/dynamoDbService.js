@@ -111,6 +111,49 @@ class DynamoDbService {
   }
 
   /**
+   * Create multiple events in batch
+   * @param {Array<{date: string, event: string}>} events - Array of events to create
+   * @returns {Promise<Array<Object>>} Array of created event objects
+   */
+  async createEventsBatch(events) {
+    try {
+      console.log(`[DynamoDB] Creating ${events.length} events in batch`);
+      console.log(`[DynamoDB] Table: ${TABLE_NAME}`);
+
+      const createdEvents = [];
+      const errors = [];
+
+      // Process events sequentially to avoid throttling
+      for (const eventData of events) {
+        try {
+          const createdEvent = await this.createEvent(eventData.date, eventData.event);
+          createdEvents.push(createdEvent);
+        } catch (error) {
+          console.error(`[DynamoDB] Error creating event for ${eventData.date}:`, error.message);
+          errors.push({
+            date: eventData.date,
+            event: eventData.event,
+            error: error.message
+          });
+        }
+      }
+
+      console.log(`[DynamoDB] Batch complete: ${createdEvents.length} succeeded, ${errors.length} failed`);
+
+      return {
+        created: createdEvents,
+        errors: errors,
+        total: events.length,
+        succeeded: createdEvents.length,
+        failed: errors.length
+      };
+    } catch (error) {
+      console.error('[DynamoDB] Error in batch creation:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Health check - verify DynamoDB connection
    * @returns {Promise<boolean>} True if connection is healthy
    */

@@ -10,7 +10,7 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 
 - 🕐 **Daily Scheduled Sync**: Automatic bin collection fetch and Quote/0 update at 01:10 UTC
 - 🗑️ **Bin Collection Storage**: Stores Reading Council bin data in DynamoDB for on-demand access
-- 📅 **Event Management**: iPhone app creates events via PUT endpoint and triggers immediate Quote/0 update
+- 📅 **Event Management**: iPhone app creates events (single or batch) and triggers immediate Quote/0 update
 - 📟 **Quote/0 Display**: Formatted output (25 char header, 3×29 char lines, 29 char footer)
 - ☁️ **Fully Serverless**: AWS Lambda + DynamoDB + EventBridge (no servers to manage)
 
@@ -29,9 +29,19 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 └───────────────────────────────────────────────────────────┘
 
 ┌───────────────────────────────────────────────────────────┐
-│  POST /api/events (iPhone app)                            │
+│  POST /api/events (iPhone app - Single Event)            │
 │  ↓                                                         │
 │  1. Insert event to DynamoDB events table                 │
+│  2. Query tomorrow's bins from DB                         │
+│  3. Query today's events from DB                          │
+│  4. Format display data                                   │
+│  5. Push to Quote/0 device                                │
+└───────────────────────────────────────────────────────────┘
+
+┌───────────────────────────────────────────────────────────┐
+│  POST /api/events/batch (iPhone app - Multiple Events)   │
+│  ↓                                                         │
+│  1. Insert all events to DynamoDB events table            │
 │  2. Query tomorrow's bins from DB                         │
 │  3. Query today's events from DB                          │
 │  4. Format display data                                   │
@@ -42,7 +52,7 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 ## Table of Contents
 
 1. [System Architecture](./01-architecture.md) - Serverless design and components
-2. [API Reference](./02-api-reference.md) - PUT /api/events endpoint documentation
+2. [API Reference](./02-api-reference.md) - POST /api/events and /api/events/batch endpoint documentation
 3. [Scheduled Service](./03-scheduled-service.md) - Daily scheduled sync implementation
 4. [Implementation Guide](./04-implementation.md) - Step-by-step setup instructions
 5. [Deployment Guide](./05-deployment.md) - AWS Lambda deployment
@@ -83,7 +93,8 @@ npm run logs
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/events` | Create event and update Quote/0 (called by iPhone app) |
+| POST | `/api/events` | Create single event and update Quote/0 (called by iPhone app) |
+| POST | `/api/events/batch` | Create multiple events and update Quote/0 (batch operation) |
 
 **Note**: No GET endpoint - this is a push-only architecture!
 
