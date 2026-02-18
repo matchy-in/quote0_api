@@ -79,21 +79,37 @@ exports.createEvent = async (event) => {
       };
     }
 
-    // Validate event text length (max 87 chars for 3 lines of 29 chars)
-    if (eventText.length > 87) {
+    // Validate event text length (max 84 chars for 3 lines of 27 chars + 3 line breaks)
+    if (eventText.length > 84) {
       return {
         statusCode: 422,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           error: 'Unprocessable Entity',
-          message: 'Event text exceeds maximum length of 87 characters'
+          message: 'Event text exceeds maximum length of 84 characters'
         })
       };
     }
+    
+    // Validate individual line lengths
+    const lines = eventText.split('\n');
+    for (const line of lines) {
+      if (line.length > 27+1) { // 27 chars + 1 for line break logic
+        return {
+          statusCode: 422,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            error: 'Unprocessable Entity',
+            message: 'A line of event text exceeds maximum length of 27 characters'
+          })
+        };
+      }
+    }
 
-    // Step 1: Create event in DynamoDB
-    const createdEvent = await dynamoDbService.createEvent(normalizedDate, eventText);
-    console.log('Event created successfully:', createdEvent);
+    // Step 1: Check if an event already exists for this date
+    console.log(`Checking for existing events on ${normalizedDate}...`);
+    const createdEvent = await dynamoDbService.upsertEvent(normalizedDate, eventText);
+    console.log('Event processed successfully:', createdEvent);
 
     // Step 2-6: Immediately update Quote/0 display (run steps 3-7 from scheduled service)
     console.log('');
@@ -243,11 +259,25 @@ exports.createEventsBatch = async (event) => {
         continue;
       }
 
-      // Validate event text length (max 87 chars for 3 lines of 29 chars)
-      if (evt.event.length > 87) {
-        validationErrors.push(`Event ${i}: Event text exceeds maximum length of 87 characters`);
+      // Validate event text length (max 37 chars for 3 lines of 27 chars + 3 line breaks)
+      if (evt.event.length > 84) {
+        validationErrors.push(`Event ${i}: Event text exceeds maximum length of 84 characters`);
         continue;
       }
+
+      // Validate individual line lengths
+      const lines = evt.event.split('\n');
+      let lineErrorFound = false;
+
+      for (const [index, line] of lines.entries()) {
+        if (line.length > 27+1) { // 27 + 1
+          validationErrors.push(`Event ${i}: Line ${index + 1} exceeds maximum length of 27 characters`);
+          lineErrorFound = true;
+          break; // We found an error for this event, stop checking lines and move on
+        }
+      }
+      
+      if (lineErrorFound) continue; // Skip pushing to normalizedEvents and go to next event
 
       normalizedEvents.push({
         date: normalizedDate,

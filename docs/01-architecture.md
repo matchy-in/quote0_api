@@ -59,7 +59,7 @@ Quote0 API is a lightweight microservice designed to aggregate and display daily
 │  │  ┌──────────────────────────────────────────────┐     │    │
 │  │  │  Display Formatter                           │     │    │
 │  │  │  - Format title (date)                       │     │    │
-│  │  │  - Format message (3 lines, 29 chars each)   │     │    │
+│  │  │  - Format message (3 lines, 27 chars each)   │     │    │
 │  │  │  - Format signature (bin reminder)           │     │    │
 │  │  │  - Enforce character limits                  │     │    │
 │  │  └──────────────────────────────────────────────┘     │    │
@@ -205,7 +205,7 @@ Billing Mode: PAY_PER_REQUEST (on-demand)
 
 **Display Constraints**:
 - Title: 25 characters (date: "YYYY/MM/DD" = 10 chars)
-- Message: 3 lines × 29 characters = 87 characters total
+- Message: 3 lines × 27 characters = 81 characters total + 2 line breaks
 - Signature: 29 characters (bin reminder)
 
 **Formatting Logic**:

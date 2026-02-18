@@ -669,10 +669,11 @@ async function createEvent(req, res) {
       });
     }
 
-    if (event.length > 87) {
+
+    if (event.length > 81) {
       return res.status(422).json({
         error: 'Unprocessable Entity',
-        message: 'Event text exceeds maximum length of 87 characters'
+        message: 'Event text exceeds maximum length of 81 characters'
       });
     }
 

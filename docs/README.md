@@ -11,7 +11,7 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 - 🕐 **Daily Scheduled Sync**: Automatic bin collection fetch and Quote/0 update at 01:10 UTC
 - 🗑️ **Bin Collection Storage**: Stores Reading Council bin data in DynamoDB for on-demand access
 - 📅 **Event Management**: iPhone app creates events (single or batch) and triggers immediate Quote/0 update
-- 📟 **Quote/0 Display**: Formatted output (25 char header, 3×29 char lines, 29 char footer)
+- 📟 **Quote/0 Display**: Formatted output (25 char header, 3×27 char lines, 29 char footer)
 - ☁️ **Fully Serverless**: AWS Lambda + DynamoDB + EventBridge (no servers to manage)
 
 ## Architecture
@@ -113,7 +113,7 @@ Quote/0 device receives (via Text API):
 
 **Constraints:**
 - `title`: 25 characters max (today's date)
-- `message`: 3 lines × 29 characters (events for today)
+- `message`: 3 lines × 27 characters (events for today)
 - `signature`: 29 characters (tomorrow's bin collection)
 - Line breaks: Use `\n`
 

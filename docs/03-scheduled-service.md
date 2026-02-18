@@ -68,7 +68,7 @@ AWS EventBridge Schedule (01:10 UTC daily)
 │  Step 5: Format Display Data               │
 │  - Title: Today's date (YYYY/MM/DD)        │
 │  - Signature: Tomorrow's bin reminder       │
-│  - Message: Today's events (3×29 chars)    │
+│  - Message: Today's events (3×27 chars + \n)│
 └─────────────────┬───────────────────────────┘
                   │
                   ▼
@@ -234,7 +234,7 @@ const events = await dynamoDbService.getEventsByDate(today);
 **Display Constraints**:
 - **Title**: 25 characters max (today's date)
 - **Signature**: 29 characters max (tomorrow's bin reminder)
-- **Message**: 3 lines × 29 characters (today's events)
+- **Message**: 3 lines × 27 characters (today's events)
 
 **Formatting Logic**:
 
@@ -251,7 +251,7 @@ const signature = `collect ${binNames.join(', ')} tmr`; // "collect Red bin, Foo
 
 **Message**:
 ```javascript
-const message = events.map(e => e.event).join('\n').substring(0, 87); // Max 87 chars (3×29)
+const message = events.map(e => e.event).join('\n').substring(0, 84); // Max 84 chars (3×27 + 3 line breaks)
 ```
 
 **Formatted Display Data**:

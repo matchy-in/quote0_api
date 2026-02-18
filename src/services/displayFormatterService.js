@@ -4,7 +4,7 @@
  */
 
 const MAX_TITLE_LENGTH = 25;
-const MAX_LINE_LENGTH = 29;
+const MAX_LINE_LENGTH = 27 + 1;
 const MAX_LINES = 3;
 
 class DisplayFormatterService {
@@ -76,7 +76,7 @@ class DisplayFormatterService {
   }
 
   /**
-   * Format message from events (3 lines, 29 chars each)
+   * Format message from events (3 lines, 27 chars each)
    * @param {Array} events - Array of event objects
    * @returns {string} Formatted message with newlines
    */

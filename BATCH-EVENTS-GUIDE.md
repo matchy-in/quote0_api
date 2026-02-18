@@ -97,7 +97,7 @@ curl -X POST https://your-api.com/api/events/batch \
 Each event is validated for:
 - ✓ Required fields (`date`, `event`)
 - ✓ Date format (YYYY/MM/DD or YYYY-MM-DD)
-- ✓ Event text length (max 87 characters)
+- ✓ Event text length (max 84 characters)
 
 ### 📊 Response Status Codes
 
@@ -343,7 +343,7 @@ if (result.quote0_updated) {
 |-------|-------|--------|
 | **Minimum events** | 1 | Must provide at least one event |
 | **Maximum events** | 100 | Prevents overload and timeout |
-| **Event text length** | 87 chars | Display constraint (3×29 chars) |
+| **Event text length** | 84 chars | Display constraint (3×27 chars) + 3 line break |
 | **Timeout** | 90 seconds | Lambda function timeout |
 
 ---

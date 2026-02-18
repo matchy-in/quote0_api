@@ -49,7 +49,7 @@ Content-Type: application/json
 | Field | Type | Required | Description | Constraints |
 |-------|------|----------|-------------|-------------|
 | `date` | string | Yes | Event date | Format: `YYYY/MM/DD` or `YYYY-MM-DD` |
-| `event` | string | Yes | Event description | Max 87 characters (3×29), supports `\n` for line breaks |
+| `event` | string | Yes | Event description | Max 4 characters (3×27 + 3 line breaks), supports `\n` for line breaks |
 
 ### Response
 
@@ -99,7 +99,7 @@ Content-Type: application/json
 ```json
 {
   "error": "Unprocessable Entity",
-  "message": "Event text exceeds maximum length of 87 characters"
+  "message": "Event text exceeds maximum length of 84 characters"
 }
 ```
 
@@ -267,7 +267,7 @@ Content-Type: application/json
 |-------|------|----------|-------------|-------------|
 | `events` | array | Yes | Array of events to create | Min 1, Max 100 events per request |
 | `events[].date` | string | Yes | Event date | Format: `YYYY/MM/DD` or `YYYY-MM-DD` |
-| `events[].event` | string | Yes | Event description | Max 87 characters (3×29), supports `\n` for line breaks |
+| `events[].event` | string | Yes | Event description | Max 84 characters (3×27 + 3 line breaks), supports `\n` for line breaks |
 
 ### Response
 
@@ -331,7 +331,7 @@ Content-Type: application/json
   "errors": [
     {
       "date": "2026-02-12",
-      "event": "This is a very long event text that exceeds the maximum allowed length of 87 characters for the display",
+      "event": "This is a very long event text that exceeds the maximum allowed length of 84 characters for the display",
       "error": "ValidationException: Event text exceeds maximum length"
     }
   ],
@@ -388,7 +388,7 @@ Content-Type: application/json
   "errors": [
     "Event 0: Missing required field 'date'",
     "Event 2: Invalid date format 'invalid-date'. Use YYYY/MM/DD or YYYY-MM-DD",
-    "Event 3: Event text exceeds maximum length of 87 characters"
+    "Event 3: Event text exceeds maximum length of 84 characters"
   ]
 }
 ```
@@ -620,7 +620,7 @@ After creating an event, the Quote/0 device receives the following JSON via its 
 | `refreshNow` | - | Always `false` (Quote/0 requirement) | `false` |
 | `title` | 25 chars | Today's date in `YYYY/MM/DD` format | `"2026/02/10"` |
 | `signature` | 29 chars | Tomorrow's bin collection reminder | `"collect Red bin tmr"` |
-| `message` | 87 chars | Today's events (3 lines × 29 chars, separated by `\n`) | `"Line 1\nLine 2\nLine 3"` |
+| `message` | 84 chars | Today's events (3 lines × 27 chars + 3 line breaks, separated by `\n`) | `"Line 1\nLine 2\nLine 3"` |
 
 ---
 
@@ -738,7 +738,7 @@ describe('POST /api/events', () => {
       .expect(400);
   });
 
-  it('should reject event text exceeding 87 characters', async () => {
+  it('should reject event text exceeding 84 characters', async () => {
     const event = {
       date: '2026/02/10',
       event: 'A'.repeat(88), // 88 characters
