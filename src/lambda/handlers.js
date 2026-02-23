@@ -12,6 +12,35 @@ const displayFormatterService = require('../services/displayFormatterService');
 const quote0ClientService = require('../services/quote0ClientService');
 const scheduledUpdateService = require('../services/scheduledUpdateService');
 
+const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN;
+
+function authorize(event) {
+  if (!API_AUTH_TOKEN) return null;
+
+  const authHeader = event.headers?.authorization || event.headers?.Authorization;
+  if (!authHeader) {
+    return {
+      statusCode: 401,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: 'Unauthorized', message: 'Missing Authorization header' })
+    };
+  }
+
+  const token = authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : authHeader;
+
+  if (token !== API_AUTH_TOKEN) {
+    return {
+      statusCode: 403,
+      headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+      body: JSON.stringify({ error: 'Forbidden', message: 'Invalid API token' })
+    };
+  }
+
+  return null;
+}
+
 /**
  * POST /api/events
  * Creates a new event in DynamoDB and immediately updates Quote/0 display
@@ -20,6 +49,9 @@ exports.createEvent = async (event) => {
   console.log('='.repeat(80));
   console.log('[POST /api/events] Request received');
   console.log('='.repeat(80));
+
+  const authError = authorize(event);
+  if (authError) return authError;
 
   try {
     // Parse request body
@@ -177,6 +209,9 @@ exports.createEventsBatch = async (event) => {
   console.log('='.repeat(80));
   console.log('[POST /api/events/batch] Request received');
   console.log('='.repeat(80));
+
+  const authError = authorize(event);
+  if (authError) return authError;
 
   try {
     // Parse request body

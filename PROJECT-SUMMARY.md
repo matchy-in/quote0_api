@@ -1,71 +1,76 @@
-# 📦 Quote0 API - Complete Serverless Package
+# Quote0 API - Complete Serverless Package
 
-## ✅ What's Been Created
+## What's Been Created
 
-### 🚀 Production-Ready Code
+### Production-Ready Code
 
 #### Core Configuration
-- ✅ **serverless.yml** - Complete AWS infrastructure (Lambda, DynamoDB, EventBridge, API Gateway)
-- ✅ **package.json** - All dependencies and npm scripts
-- ✅ **.gitignore** - Git configuration
-- ✅ **.env.example** - Environment variable template
+- **serverless.yml** - Complete AWS infrastructure (Lambda, DynamoDB, EventBridge, API Gateway)
+- **package.json** - All dependencies and npm scripts
+- **.gitignore** - Git configuration
+- **.env.example** - Environment variable template
 
 #### Lambda Handlers & Services
-- ✅ **src/lambda/handlers.js** - All Lambda function handlers
-- ✅ **src/services/dynamoDbService.js** - DynamoDB operations with AWS SDK v3
-- ✅ **src/services/binCollectionService.js** - Reading Council API integration
-- ✅ **src/services/displayFormatterService.js** - Quote/0 display formatting
-- ✅ **src/services/quote0ClientService.js** - Quote/0 device communication
-- ✅ **src/services/scheduledUpdateService.js** - Scheduled update orchestration
+- **src/lambda/handlers.js** - All Lambda function handlers with Bearer token authorization
+- **src/services/dynamoDbService.js** - DynamoDB operations for events (AWS SDK v3)
+- **src/services/binCollectionDbService.js** - DynamoDB operations for bin collections
+- **src/services/binCollectionService.js** - Reading Council API integration
+- **src/services/displayFormatterService.js** - Quote/0 display formatting
+- **src/services/quote0ClientService.js** - Quote/0 device communication (with Bearer auth)
+- **src/services/scheduledUpdateService.js** - Scheduled update orchestration
 
-### 📚 Complete Documentation
+### Complete Documentation
 
 #### Quick References
-- ✅ **README.md** - Project overview and quick links
-- ✅ **QUICKSTART.md** - 10-minute deployment guide
-- ✅ **PROJECT-SUMMARY.md** - This file!
+- **README.md** - Project overview and quick links
+- **QUICKSTART.md** - 10-minute deployment guide
+- **BATCH-EVENTS-GUIDE.md** - Batch event creation guide
+- **PROJECT-SUMMARY.md** - This file!
 
 #### Detailed Guides
-- ✅ **docs/README.md** - Documentation index
-- ✅ **docs/01-architecture.md** - System architecture (updated for DynamoDB)
-- ✅ **docs/02-api-reference.md** - Complete API documentation
-- ✅ **docs/03-scheduled-service.md** - EventBridge scheduling details
-- ✅ **docs/04-implementation.md** - Development guide
-- ✅ **docs/05-deployment.md** - Deployment instructions
+- **docs/README.md** - Documentation index
+- **docs/01-architecture.md** - System architecture
+- **docs/02-api-reference.md** - Complete API documentation
+- **docs/03-scheduled-service.md** - EventBridge scheduling details
+- **docs/04-implementation.md** - Development guide
+- **docs/05-deployment.md** - Deployment instructions
 
 ---
 
-## 🎯 Architecture Highlights
+## Architecture Highlights
 
 ### Serverless Stack
 ```
 AWS Lambda (Node.js 18)
-    ↓
-AWS API Gateway HTTP API
-    ↓
+    |
+AWS API Gateway HTTP API (with Bearer token auth)
+    |
 Amazon DynamoDB (Pay-per-request)
-    ↓
-AWS EventBridge (Cron schedules)
+    |
+AWS EventBridge (Cron schedule)
 ```
 
 ### Key Features
+- **Push-only architecture** - Lambda pushes to Quote/0 via official Text API
 - **No servers to manage** - Fully serverless
+- **API Authorization** - Bearer token on all HTTP endpoints
 - **Auto-scaling** - Handles any traffic
 - **Pay-per-use** - ~$1.18/month typical cost
 - **High availability** - AWS managed
-- **No connection pooling** - DynamoDB HTTP API
-- **Auto-deletion** - Events TTL after 90 days
+- **Auto-deletion** - Events and bin collections TTL after 90 days
 
 ---
 
-## 🚀 Next Steps
+## Next Steps
 
 ### 1. Configure Environment (2 minutes)
 
 Create `.env` file:
 ```bash
-UPRN=310022781  # Your property reference
-QUOTE0_TEXT_API=http://your-device-ip/text-api
+UPRN=310022781
+QUOTE0_TEXT_API=https://dot.mindreset.tech/api/authV2/open/device/YOUR_DEVICE_ID/text
+QUOTE0_AUTH_TOKEN=your_quote0_device_token
+API_AUTH_TOKEN=your-secret-api-key
 ```
 
 ### 2. Install Dependencies (1 minute)
@@ -86,60 +91,59 @@ npm run deploy:dev
 
 You'll get:
 - API Gateway URL
-- DynamoDB table name
+- DynamoDB table names (events + bin_collection)
 - Lambda function ARNs
-- EventBridge rules configured
+- EventBridge rule configured (01:10 UTC daily)
 
 ### 4. Test Endpoints (2 minutes)
 
 ```bash
-# Test GET endpoint
-curl https://YOUR-API-URL.execute-api.us-east-1.amazonaws.com/api/display
-
-# Test PUT endpoint
-curl -X PUT https://YOUR-API-URL.execute-api.us-east-1.amazonaws.com/api/events \
+# Test POST /api/events (create single event)
+curl -X POST https://YOUR-API-URL.execute-api.us-east-1.amazonaws.com/api/events \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{"date":"2026/02/10","event":"Test event"}'
+
+# Test POST /api/events/batch (create multiple events)
+curl -X POST https://YOUR-API-URL.execute-api.us-east-1.amazonaws.com/api/events/batch \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{
+    "events": [
+      {"date":"2026/02/10","event":"Test event 1"},
+      {"date":"2026/02/11","event":"Test event 2"}
+    ]
+  }'
 ```
 
-### 5. Configure Quote/0 Device
-
-Point device to:
-```
-https://YOUR-API-URL.execute-api.us-east-1.amazonaws.com/api/display
-```
-
-Update interval: **60 minutes**
-
-### 6. Monitor Scheduled Updates
+### 5. Monitor Scheduled Updates
 
 ```bash
 # View logs in real-time
 npm run logs
 
-# Check EventBridge rules
+# Check EventBridge rule
 aws events list-rules --name-prefix quote0-api
 ```
 
 ---
 
-## 📊 What This Deployment Includes
+## What This Deployment Includes
 
 ### AWS Resources Created
 
 | Resource | Name | Purpose |
 |----------|------|---------|
 | **Lambda Functions** | | |
-| - getDisplay | `quote0-api-dev-getDisplay` | GET /api/display handler |
-| - createEvent | `quote0-api-dev-createEvent` | PUT /api/events handler |
+| - createEvent | `quote0-api-dev-createEvent` | POST /api/events handler |
+| - createEventsBatch | `quote0-api-dev-createEventsBatch` | POST /api/events/batch handler |
 | - scheduledUpdate | `quote0-api-dev-scheduledUpdate` | Scheduled push to Quote/0 |
-| **DynamoDB Table** | | |
+| - testScheduledUpdate | `quote0-api-dev-testScheduledUpdate` | Dev test trigger |
+| **DynamoDB Tables** | | |
 | - Events | `quote0-api-dev-events` | Event storage |
+| - Bin Collection | `quote0-api-dev-bin-collection` | Bin schedule storage |
 | **EventBridge Rules** | | |
 | - Schedule 01:10 | `quote0-api-dev-schedule-0110` | Daily trigger |
-| - Schedule 07:10 | `quote0-api-dev-schedule-0710` | Daily trigger |
-| - Schedule 12:10 | `quote0-api-dev-schedule-1210` | Daily trigger |
-| - Schedule 17:10 | `quote0-api-dev-schedule-1710` | Daily trigger |
 | **API Gateway** | | |
 | - HTTP API | Auto-generated URL | REST API endpoints |
 | **IAM Roles** | | |
@@ -148,21 +152,13 @@ aws events list-rules --name-prefix quote0-api
 ### Scheduled Updates
 
 The system automatically pushes to Quote/0 at:
-- **01:10 UTC** - Early morning
-- **07:10 UTC** - Morning (before work)
-- **12:10 UTC** - Midday
-- **17:10 UTC** - Evening (after work)
+- **01:10 UTC** - Daily bin collection sync and display update
 
-**Note:** Times are UTC. To use your local timezone, edit `serverless.yml`:
-```yaml
-# Example for EST (UTC-5): 06:10 EST = 11:10 UTC
-- schedule:
-    rate: cron(10 11 * * ? *)  # 06:10 EST
-```
+Additionally, Quote/0 is updated immediately when events are created via the API.
 
 ---
 
-## 💰 Cost Breakdown
+## Cost Breakdown
 
 ### Monthly Cost Estimate (Typical Usage)
 
@@ -177,7 +173,7 @@ The system automatically pushes to Quote/0 at:
 | - Storage | < 1GB | $0.25 |
 | **API Gateway** | | |
 | - HTTP API requests | ~1,000 | $0.01 |
-| **EventBridge** | 120 invocations/month | **Free** |
+| **EventBridge** | 30 invocations/month | **Free** |
 | **CloudWatch Logs** | ~5GB | $0.25 |
 | **Total** | | **~$1.18/month** |
 
@@ -188,30 +184,33 @@ For first 12 months of AWS account:
 - API Gateway: 1M requests/month free
 - CloudWatch: 5GB logs free
 
-**Your usage likely fits entirely in Free Tier!** ✨
+**Your usage likely fits entirely in Free Tier!**
 
 ---
 
-## 🧪 Testing Checklist
+## Testing Checklist
 
 After deployment, verify:
 
-- [ ] GET /api/display returns valid JSON
-- [ ] PUT /api/events creates event in DynamoDB
-- [ ] Check DynamoDB table has event: `aws dynamodb scan --table-name quote0-api-dev-events`
-- [ ] Check EventBridge rules exist: `aws events list-rules --name-prefix quote0-api`
+- [ ] POST /api/events returns 201 with `quote0_updated: true`
+- [ ] POST /api/events/batch returns 201 with batch results
+- [ ] Requests without Authorization header return 401
+- [ ] Requests with wrong token return 403
+- [ ] Check DynamoDB events table has data: `aws dynamodb scan --table-name quote0-api-dev-events`
+- [ ] Check EventBridge rule exists: `aws events list-rules --name-prefix quote0-api`
 - [ ] View Lambda logs: `npm run logs`
 - [ ] Test scheduled update: `serverless invoke --function scheduledUpdate --stage dev`
 
 ---
 
-## 📖 Documentation Quick Reference
+## Documentation Quick Reference
 
 | What You Need | Where to Look |
 |---------------|---------------|
 | **Quick deployment** | [QUICKSTART.md](./QUICKSTART.md) |
 | **System architecture** | [docs/01-architecture.md](./docs/01-architecture.md) |
 | **API endpoints** | [docs/02-api-reference.md](./docs/02-api-reference.md) |
+| **Batch events** | [BATCH-EVENTS-GUIDE.md](./BATCH-EVENTS-GUIDE.md) |
 | **Scheduled service** | [docs/03-scheduled-service.md](./docs/03-scheduled-service.md) |
 | **Development guide** | [docs/04-implementation.md](./docs/04-implementation.md) |
 | **Deployment details** | [docs/05-deployment.md](./docs/05-deployment.md) |
@@ -219,11 +218,11 @@ After deployment, verify:
 
 ---
 
-## 🎓 Key Technologies Used
+## Key Technologies Used
 
 ### AWS Services
 - **Lambda** - Serverless compute
-- **DynamoDB** - NoSQL database
+- **DynamoDB** - NoSQL database (events + bin_collection tables)
 - **EventBridge** - Cron scheduling
 - **API Gateway** - HTTP API
 - **CloudWatch** - Logging and monitoring
@@ -238,104 +237,54 @@ After deployment, verify:
 
 ### External Integrations
 - **Reading Council Bin API** - Waste collection schedules
-- **Quote/0 Text API** - Device display updates
+- **Quote/0 Text API** - Device display updates (with Bearer auth)
 
 ---
 
-## 🔧 Maintenance & Operations
-
-### View Logs
-```bash
-# Tail logs in real-time
-npm run logs
-
-# View specific function logs
-aws logs tail /aws/lambda/quote0-api-dev-scheduledUpdate --follow
-
-# Query logs
-aws logs filter-log-events \
-  --log-group-name /aws/lambda/quote0-api-dev-scheduledUpdate \
-  --start-time $(date -u -d '1 hour ago' +%s)000
-```
-
-### Update Deployment
-```bash
-# Pull latest code
-git pull
-
-# Redeploy
-npm run deploy:dev
-```
-
-### Modify Schedule Times
-Edit `serverless.yml`:
-```yaml
-events:
-  - schedule:
-      rate: cron(10 8 * * ? *)  # Change to 08:10 UTC
-```
-
-Then redeploy:
-```bash
-npm run deploy:dev
-```
-
-### Monitor Costs
-```bash
-# View AWS Cost Explorer
-aws ce get-cost-and-usage \
-  --time-period Start=2026-02-01,End=2026-02-28 \
-  --granularity MONTHLY \
-  --metrics BlendedCost
-```
-
----
-
-## 🎉 Success Criteria
+## Success Criteria
 
 You're ready when:
 
-✅ Deployment completes without errors  
-✅ GET /api/display returns display data  
-✅ PUT /api/events creates events in DynamoDB  
-✅ EventBridge rules are enabled  
-✅ Lambda logs show scheduled updates running  
-✅ Quote/0 device is configured with API URL  
-✅ Bin collection signature appears when applicable  
-✅ Events display correctly on Quote/0  
+- Deployment completes without errors
+- POST /api/events creates events in DynamoDB and updates Quote/0
+- POST /api/events/batch creates batch events
+- Unauthorized requests are rejected (401/403)
+- EventBridge rule is enabled (01:10 UTC)
+- Lambda logs show scheduled updates running
+- Quote/0 device shows correct data
 
 ---
 
-## 🚨 Troubleshooting Quick Fixes
+## Troubleshooting Quick Fixes
 
 ### "Access Denied" during deployment
 ```bash
 aws configure  # Re-enter credentials
 ```
 
+### "401 Unauthorized" on API calls
+Ensure you're sending `Authorization: Bearer YOUR_API_AUTH_TOKEN` header.
+
 ### Scheduled updates not running
 ```bash
-# Check if rules are enabled
 aws events list-rules --name-prefix quote0-api-dev
-
-# Enable if disabled
-aws events enable-rule --name quote0-api-dev-schedule-0710
+aws events describe-rule --name quote0-api-dev-schedule-0110
 ```
 
 ### DynamoDB access errors
 ```bash
-# Check IAM role permissions
 aws iam get-role --role-name quote0-api-dev-us-east-1-lambdaRole
 ```
 
 ### Quote/0 not updating
 1. Check `QUOTE0_TEXT_API` environment variable is set
-2. Verify device is reachable
-3. Check Lambda logs for errors
+2. Check `QUOTE0_AUTH_TOKEN` is correct
+3. Verify device is reachable
+4. Check Lambda logs for errors
 
 ---
 
-## 📞 Support
+## Support
 
 - **Documentation**: See `docs/` folder
 - **Logs**: `npm run logs` or AWS CloudWatch
@@ -344,8 +293,6 @@ aws iam get-role --role-name quote0-api-dev-us-east-1-lambdaRole
 
 ---
 
-**🎊 Congratulations! Your serverless Quote0 API is ready to deploy!**
-
-Your automated household reminder system awaits! 🏠✨
+**Your serverless Quote0 API is ready to deploy!**
 
 See [QUICKSTART.md](./QUICKSTART.md) to get started in 10 minutes!

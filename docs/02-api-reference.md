@@ -10,6 +10,23 @@ Quote0 API provides **two endpoints** for creating events:
 
 ---
 
+## Authorization
+
+All HTTP endpoints require a Bearer token in the `Authorization` header:
+
+```
+Authorization: Bearer YOUR_API_AUTH_TOKEN
+```
+
+| Response | Meaning |
+|----------|---------|
+| **401 Unauthorized** | Missing Authorization header |
+| **403 Forbidden** | Invalid API token |
+
+If `API_AUTH_TOKEN` is not set in the environment, authorization is skipped (useful for local development).
+
+---
+
 ## Base URL
 
 ```
@@ -22,14 +39,15 @@ Production:  https://{your-api-gateway-domain}/api
 ## POST /api/events
 
 ### Description
-Creates a new event in DynamoDB and **immediately triggers a Quote/0 display update**.
+Creates a new event in DynamoDB (or updates an existing one for the same date) and **immediately triggers a Quote/0 display update**.
 
 ### Workflow
-1. Insert event to DynamoDB `events` table
-2. Query tomorrow's bin collections from DynamoDB `bin_collection` table
-3. Query today's events from DynamoDB `events` table
-4. Format display data
-5. **Push to Quote/0 device** via Quote/0 Text API
+1. Authorize request (Bearer token)
+2. Upsert event to DynamoDB `events` table
+3. Query tomorrow's bin collections from DynamoDB `bin_collection` table
+4. Query today's events from DynamoDB `events` table
+5. Format display data
+6. **Push to Quote/0 device** via Quote/0 Text API
 
 ### Request
 
@@ -37,6 +55,7 @@ Creates a new event in DynamoDB and **immediately triggers a Quote/0 display upd
 POST /api/events HTTP/1.1
 Host: your-api-gateway.amazonaws.com
 Content-Type: application/json
+Authorization: Bearer YOUR_API_AUTH_TOKEN
 
 {
   "date": "2026/02/10",
@@ -118,6 +137,7 @@ Content-Type: application/json
 ```bash
 curl -X POST https://your-api.com/api/events \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{
     "date": "2026/02/10",
     "event": "Dentist appointment 3pm"
@@ -132,6 +152,7 @@ const createEvent = async (date, event) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': 'Bearer YOUR_API_AUTH_TOKEN',
     },
     body: JSON.stringify({ date, event }),
   });
@@ -176,6 +197,7 @@ func createEvent(date: String, event: String, completion: @escaping (Result<Even
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer YOUR_API_AUTH_TOKEN", forHTTPHeaderField: "Authorization")
     
     let eventRequest = EventRequest(date: date, event: event)
     
@@ -229,8 +251,9 @@ Creates multiple events in DynamoDB in a single request and **immediately trigge
 This endpoint is more efficient than calling `POST /api/events` multiple times when you need to create several events at once.
 
 ### Workflow
-1. Validate all events in the batch
-2. Insert all events to DynamoDB `events` table (sequentially to avoid throttling)
+1. Authorize request (Bearer token)
+2. Validate all events in the batch
+3. Upsert all events to DynamoDB `events` table (sequentially to avoid throttling)
 3. Query tomorrow's bin collections from DynamoDB `bin_collection` table
 4. Query today's events from DynamoDB `events` table
 5. Format display data
@@ -242,6 +265,7 @@ This endpoint is more efficient than calling `POST /api/events` multiple times w
 POST /api/events/batch HTTP/1.1
 Host: your-api-gateway.amazonaws.com
 Content-Type: application/json
+Authorization: Bearer YOUR_API_AUTH_TOKEN
 
 {
   "events": [
@@ -408,6 +432,7 @@ Content-Type: application/json
 ```bash
 curl -X POST https://your-api.com/api/events/batch \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{
     "events": [
       {
@@ -434,6 +459,7 @@ const createEventsBatch = async (events) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      'Authorization': 'Bearer YOUR_API_AUTH_TOKEN',
     },
     body: JSON.stringify({ events }),
   });
@@ -503,6 +529,7 @@ func createEventsBatch(events: [EventItem], completion: @escaping (Result<BatchE
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer YOUR_API_AUTH_TOKEN", forHTTPHeaderField: "Authorization")
     
     let batchRequest = BatchEventRequest(events: events)
     
@@ -582,9 +609,14 @@ $events = @{
 }
 
 $body = $events | ConvertTo-Json -Depth 3
+$headers = @{
+    "Authorization" = "Bearer YOUR_API_AUTH_TOKEN"
+}
+
 $response = Invoke-RestMethod -Uri "https://your-api.com/api/events/batch" `
     -Method POST `
     -ContentType "application/json" `
+    -Headers $headers `
     -Body $body
 
 Write-Host "✅ Batch complete: $($response.succeeded)/$($response.total) events created"
@@ -676,12 +708,19 @@ GET https://api.reading.gov.uk/api/collections/310022781
 
 ## Authentication
 
-**Current Implementation**: None (private API, trusted iPhone app)
+**Implementation**: Bearer token authorization on all HTTP endpoints.
 
-**Future Considerations**:
-- API Key authentication: `X-API-Key: {device_key}`
-- OAuth 2.0 for iPhone app
-- JWT tokens for session management
+All requests must include:
+```
+Authorization: Bearer YOUR_API_AUTH_TOKEN
+```
+
+Set the `API_AUTH_TOKEN` environment variable to your secret token. If not set, authorization is skipped (for local dev).
+
+| Response | Meaning |
+|----------|---------|
+| **401 Unauthorized** | Missing Authorization header |
+| **403 Forbidden** | Invalid API token |
 
 ---
 
@@ -693,6 +732,7 @@ GET https://api.reading.gov.uk/api/collections/310022781
 ```bash
 curl -X POST http://localhost:3000/api/events \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{
     "date": "2026/02/10",
     "event": "Test event"

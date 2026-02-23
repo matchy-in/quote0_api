@@ -8,18 +8,19 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 
 ## Key Features
 
-- 🕐 **Daily Scheduled Sync**: Automatic bin collection fetch and Quote/0 update at 01:10 UTC
-- 🗑️ **Bin Collection Storage**: Stores Reading Council bin data in DynamoDB for on-demand access
-- 📅 **Event Management**: iPhone app creates events (single or batch) and triggers immediate Quote/0 update
-- 📟 **Quote/0 Display**: Formatted output (25 char header, 3×27 char lines, 29 char footer)
-- ☁️ **Fully Serverless**: AWS Lambda + DynamoDB + EventBridge (no servers to manage)
+- **Daily Scheduled Sync**: Automatic bin collection fetch and Quote/0 update at 01:10 UTC
+- **Bin Collection Storage**: Stores Reading Council bin data in DynamoDB for on-demand access
+- **Event Management**: iPhone app creates events (single or batch) and triggers immediate Quote/0 update
+- **API Authorization**: Bearer token authentication on all HTTP endpoints
+- **Quote/0 Display**: Formatted output (25 char header, 3x27 char lines, 29 char footer)
+- **Fully Serverless**: AWS Lambda + DynamoDB + EventBridge (no servers to manage)
 
 ## Architecture
 
 ```
 ┌───────────────────────────────────────────────────────────┐
 │  Daily Scheduled Service (01:10 UTC)                      │
-│  ↓                                                         │
+│                                                           │
 │  1. Fetch bin collections from Reading API                │
 │  2. Store in DynamoDB bin_collection table                │
 │  3. Query tomorrow's bins from DB                         │
@@ -29,23 +30,28 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 └───────────────────────────────────────────────────────────┘
 
 ┌───────────────────────────────────────────────────────────┐
-│  POST /api/events (iPhone app - Single Event)            │
-│  ↓                                                         │
-│  1. Insert event to DynamoDB events table                 │
-│  2. Query tomorrow's bins from DB                         │
-│  3. Query today's events from DB                          │
-│  4. Format display data                                   │
-│  5. Push to Quote/0 device                                │
+│  POST /api/events (iPhone app - Single Event)             │
+│  Authorization: Bearer <API_AUTH_TOKEN>                    │
+│                                                           │
+│  1. Authorize request                                     │
+│  2. Upsert event to DynamoDB events table                 │
+│  3. Query tomorrow's bins from DB                         │
+│  4. Query today's events from DB                          │
+│  5. Format display data                                   │
+│  6. Push to Quote/0 device                                │
 └───────────────────────────────────────────────────────────┘
 
 ┌───────────────────────────────────────────────────────────┐
-│  POST /api/events/batch (iPhone app - Multiple Events)   │
-│  ↓                                                         │
-│  1. Insert all events to DynamoDB events table            │
-│  2. Query tomorrow's bins from DB                         │
-│  3. Query today's events from DB                          │
-│  4. Format display data                                   │
-│  5. Push to Quote/0 device                                │
+│  POST /api/events/batch (iPhone app - Multiple Events)    │
+│  Authorization: Bearer <API_AUTH_TOKEN>                    │
+│                                                           │
+│  1. Authorize request                                     │
+│  2. Validate all events                                   │
+│  3. Upsert all events to DynamoDB events table            │
+│  4. Query tomorrow's bins from DB                         │
+│  5. Query today's events from DB                          │
+│  6. Format display data                                   │
+│  7. Push to Quote/0 device                                │
 └───────────────────────────────────────────────────────────┘
 ```
 
@@ -79,6 +85,8 @@ npm install
 # Create .env file with:
 # UPRN=310022781
 # QUOTE0_TEXT_API=your-quote0-endpoint
+# QUOTE0_AUTH_TOKEN=your-quote0-bearer-token
+# API_AUTH_TOKEN=your-secret-api-key
 
 # Deploy to AWS
 npm run deploy:dev
@@ -87,14 +95,17 @@ npm run deploy:dev
 npm run logs
 ```
 
-**⚡ See [QUICKSTART.md](../QUICKSTART.md) for complete 10-minute setup guide!**
+**See [QUICKSTART.md](../QUICKSTART.md) for complete 10-minute setup guide!**
 
 ### API Endpoints
 
+All HTTP endpoints require `Authorization: Bearer <API_AUTH_TOKEN>` header.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/api/events` | Create single event and update Quote/0 (called by iPhone app) |
-| POST | `/api/events/batch` | Create multiple events and update Quote/0 (batch operation) |
+| POST | `/api/events` | Create single event and update Quote/0 |
+| POST | `/api/events/batch` | Create multiple events and update Quote/0 |
+| POST | `/test/scheduled-update` | Manually trigger scheduled update (dev only) |
 
 **Note**: No GET endpoint - this is a push-only architecture!
 
@@ -104,23 +115,22 @@ Quote/0 device receives (via Text API):
 
 ```json
 {
-  "refreshNow": false,
-  "title": "2026/02/10",
-  "signature": "collect Food waste, Red bin tmr",
-  "message": "AE Maths 3 upto page 63\nclass book week 20\nAE VR 3 chapter letter codes"
+  "date": "2026/02/10",
+  "message": "collect Red bin tmr\nAE Maths 3 upto page 63\nclass book week 20\nAE VR 3 chapter letter codes"
 }
 ```
 
 **Constraints:**
-- `title`: 25 characters max (today's date)
-- `message`: 3 lines × 27 characters (events for today)
-- `signature`: 29 characters (tomorrow's bin collection)
+- `date`: Today's date
+- `message`: Bin collection reminder + events for today
 - Line breaks: Use `\n`
 
 ## Scheduled Service
 
 The microservice automatically syncs and updates Quote/0 at:
 - **01:10 UTC** - Daily bin collection sync and display update
+
+Additionally, creating events via the API triggers an immediate Quote/0 update.
 
 ## DynamoDB Tables
 
@@ -144,6 +154,17 @@ Bin collection services are mapped to friendly names:
 | Recycling Collection Service | Red bin |
 | Food Waste Collection Service | Food waste |
 
+## Security
+
+### API Authorization
+- All HTTP endpoints require `Authorization: Bearer <API_AUTH_TOKEN>`
+- Missing header: 401 Unauthorized
+- Invalid token: 403 Forbidden
+- Scheduled EventBridge triggers: No auth needed (internal)
+
+### Outbound Authentication
+- Quote/0 Text API: `Authorization: Bearer <QUOTE0_AUTH_TOKEN>`
+
 ## External Dependencies
 
 - **Reading Council API**: `https://api.reading.gov.uk/api/collections/310022781`
@@ -153,7 +174,7 @@ Bin collection services are mapped to friendly names:
 
 - **Version**: 1.0.0
 - **Status**: Active Development
-- **Architecture**: Push-only (Serverless)
+- **Architecture**: Push-only (Serverless) with Bearer token auth
 
 ---
 

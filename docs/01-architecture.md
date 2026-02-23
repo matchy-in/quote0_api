@@ -2,169 +2,185 @@
 
 ## Overview
 
-Quote0 API is a lightweight microservice designed to aggregate and display daily events on a Quote/0 reminder device, with automatic integration of bin collection schedules.
+Quote0 API is a lightweight serverless microservice designed to aggregate and display daily events on a Quote/0 reminder device, with automatic integration of bin collection schedules. It uses a **push-only** architecture where Lambda functions actively push updates to the Quote/0 device.
 
 ## Architecture Diagram
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                    Quote0 Microservice                           │
+│                    Quote0 Microservice (AWS)                      │
 │                                                                  │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │         Scheduled Service (Cron)                       │    │
-│  │         Triggers: 01:10, 07:10, 12:10, 17:10          │    │
-│  │                                                        │    │
-│  │  1. Fetch bin collections                             │    │
-│  │  2. Query today's events                              │    │
-│  │  3. Format display data                               │    │
-│  │  4. Push to Quote/0 device                            │    │
-│  └────────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────────┐     │
+│  │         Scheduled Service (EventBridge Cron)           │     │
+│  │         Trigger: 01:10 UTC daily                       │     │
+│  │                                                        │     │
+│  │  1. Fetch bin collections from Reading API             │     │
+│  │  2. Store in DynamoDB bin_collection table              │     │
+│  │  3. Query tomorrow's bins from DB                      │     │
+│  │  4. Query today's events from DB                       │     │
+│  │  5. Format display data                                │     │
+│  │  6. Push to Quote/0 device                             │     │
+│  └────────────────────────────────────────────────────────┘     │
 │                                                                  │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │         GET /api/display                               │    │
-│  │         (Quote/0 hourly pull)                          │    │
-│  │                                                        │    │
-│  │  1. Fetch bin collections                             │    │
-│  │  2. Query today's events                              │    │
-│  │  3. Format and return display JSON                    │    │
-│  └────────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────────┐     │
+│  │         POST /api/events                               │     │
+│  │         Authorization: Bearer <API_AUTH_TOKEN>          │     │
+│  │         (iPhone app / PC - single event creation)      │     │
+│  │                                                        │     │
+│  │  1. Authorize request                                  │     │
+│  │  2. Upsert event to DynamoDB                           │     │
+│  │  3. Query bins + events, format, push to Quote/0       │     │
+│  └────────────────────────────────────────────────────────┘     │
 │                                                                  │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │         PUT /api/events                                │    │
-│  │         (iPhone app event creation)                    │    │
-│  │                                                        │    │
-│  │  1. Validate input                                    │    │
-│  │  2. Insert to database                                │    │
-│  │  3. Return success                                    │    │
-│  └────────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────────┐     │
+│  │         POST /api/events/batch                         │     │
+│  │         Authorization: Bearer <API_AUTH_TOKEN>          │     │
+│  │         (iPhone app / PC - batch event creation)       │     │
+│  │                                                        │     │
+│  │  1. Authorize request                                  │     │
+│  │  2. Validate and upsert all events to DynamoDB         │     │
+│  │  3. Query bins + events, format, push to Quote/0       │     │
+│  └────────────────────────────────────────────────────────┘     │
 │                                                                  │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │         Core Services                                  │    │
-│  │                                                        │    │
-│  │  ┌──────────────────────────────────────────────┐     │    │
-│  │  │  Bin Collection Service                      │     │    │
-│  │  │  - Fetch from Reading Council API            │     │    │
-│  │  │  - Filter for tomorrow's collections         │     │    │
-│  │  │  - Map service names to friendly format      │     │    │
-│  │  │  - Cache for 12 hours                        │     │    │
-│  │  └──────────────────────────────────────────────┘     │    │
-│  │                                                        │    │
-│  │  ┌──────────────────────────────────────────────┐     │    │
-│  │  │  Event Service                               │     │    │
-│  │  │  - Query events for specific date            │     │    │
-│  │  │  - Create new events                         │     │    │
-│  │  │  - Format events for display                 │     │    │
-│  │  └──────────────────────────────────────────────┘     │    │
-│  │                                                        │    │
-│  │  ┌──────────────────────────────────────────────┐     │    │
-│  │  │  Display Formatter                           │     │    │
-│  │  │  - Format title (date)                       │     │    │
-│  │  │  - Format message (3 lines, 27 chars each)   │     │    │
-│  │  │  - Format signature (bin reminder)           │     │    │
-│  │  │  - Enforce character limits                  │     │    │
-│  │  └──────────────────────────────────────────────┘     │    │
-│  │                                                        │    │
-│  │  ┌──────────────────────────────────────────────┐     │    │
-│  │  │  Quote/0 Client                              │     │    │
-│  │  │  - Send formatted data to Quote/0 text API   │     │    │
-│  │  │  - Handle errors and retries                 │     │    │
-│  │  └──────────────────────────────────────────────┘     │    │
-│  └────────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────────┐     │
+│  │         Core Services                                  │     │
+│  │                                                        │     │
+│  │  ┌──────────────────────────────────────────────┐     │     │
+│  │  │  Bin Collection Service                      │     │     │
+│  │  │  - Fetch from Reading Council API            │     │     │
+│  │  │  - Filter for tomorrow's collections         │     │     │
+│  │  │  - Map service names to friendly format      │     │     │
+│  │  └──────────────────────────────────────────────┘     │     │
+│  │                                                        │     │
+│  │  ┌──────────────────────────────────────────────┐     │     │
+│  │  │  Bin Collection DB Service                   │     │     │
+│  │  │  - Store collections in DynamoDB             │     │     │
+│  │  │  - Query by date                             │     │     │
+│  │  │  - Get tomorrow's collections                │     │     │
+│  │  └──────────────────────────────────────────────┘     │     │
+│  │                                                        │     │
+│  │  ┌──────────────────────────────────────────────┐     │     │
+│  │  │  DynamoDB Service (Events)                   │     │     │
+│  │  │  - Query events for specific date            │     │     │
+│  │  │  - Create / update / upsert events           │     │     │
+│  │  │  - Batch event creation                      │     │     │
+│  │  └──────────────────────────────────────────────┘     │     │
+│  │                                                        │     │
+│  │  ┌──────────────────────────────────────────────┐     │     │
+│  │  │  Display Formatter                           │     │     │
+│  │  │  - Format date header                        │     │     │
+│  │  │  - Format message (events + bins)            │     │     │
+│  │  │  - Enforce character limits                  │     │     │
+│  │  │  - Sanitize special characters               │     │     │
+│  │  └──────────────────────────────────────────────┘     │     │
+│  │                                                        │     │
+│  │  ┌──────────────────────────────────────────────┐     │     │
+│  │  │  Quote/0 Client                              │     │     │
+│  │  │  - Send formatted data to Quote/0 text API   │     │     │
+│  │  │  - Bearer token authentication               │     │     │
+│  │  │  - Handle errors and retries                 │     │     │
+│  │  └──────────────────────────────────────────────┘     │     │
+│  └────────────────────────────────────────────────────────┘     │
 │                                                                  │
-│  ┌────────────────────────────────────────────────────────┐    │
-│  │         Database (Events)                              │    │
-│  │         Table: events                                  │    │
-│  │         Fields: id, date, event, created_at            │    │
-│  └────────────────────────────────────────────────────────┘    │
+│  ┌────────────────────────────────────────────────────────┐     │
+│  │         DynamoDB Tables                                │     │
+│  │                                                        │     │
+│  │  events:                                               │     │
+│  │    PK: date (YYYY-MM-DD), SK: id (UUID)               │     │
+│  │    Fields: event, created_at, updated_at, ttl          │     │
+│  │                                                        │     │
+│  │  bin_collection:                                       │     │
+│  │    PK: date (YYYY-MM-DD), SK: service                 │     │
+│  │    Fields: day, round, schedule, updated_at, ttl       │     │
+│  └────────────────────────────────────────────────────────┘     │
 └──────────────────────────────────────────────────────────────────┘
                            │
                            │ External APIs
                            │
         ┌──────────────────┴──────────────────┐
         │                                     │
-        ▼                                     ▼
+        v                                     v
 ┌────────────────────┐              ┌────────────────────┐
 │ Reading Council    │              │ Quote/0 Device     │
 │ Bin Collection API │              │ Text API           │
 │                    │              │                    │
-│ GET /collections/  │              │ POST /text-api     │
-│     {uprn}         │              │                    │
+│ GET /collections/  │              │ POST /text         │
+│     {uprn}         │              │ (Bearer auth)      │
 └────────────────────┘              └────────────────────┘
 ```
 
 ## Components
 
-### 1. Scheduled Service (Cron Job)
+### 1. Scheduled Service (EventBridge Cron)
 
-**Purpose**: Proactively push updates to Quote/0 at specific times daily.
+**Purpose**: Proactively push updates to Quote/0 daily.
 
-**Trigger Times**:
-- 01:10 AM
-- 07:10 AM
-- 12:10 PM
-- 17:10 PM
+**Trigger Time**: 01:10 UTC daily
 
 **Process Flow**:
 ```
-1. Triggered by cron scheduler
+1. Triggered by EventBridge cron
 2. Fetch bin collection data from Reading Council API
-3. Filter for tomorrow's bin collections
-4. Query database for today's events
-5. Format display data (title, message, signature)
-6. Send POST request to Quote/0 text API
-7. Log success/failure
+3. Store collections in DynamoDB bin_collection table
+4. Query tomorrow's bin collections from DB
+5. Query database for today's events
+6. Format display data
+7. Send POST request to Quote/0 Text API (with Bearer token)
+8. Log success/failure
 ```
 
-**Implementation**: 
-- AWS EventBridge (for Lambda)
-- Node-cron (for traditional server)
-- System cron (for Linux server)
+**Implementation**: AWS EventBridge with Lambda
 
-### 2. GET /api/display Endpoint
+### 2. POST /api/events Endpoint
 
-**Purpose**: Allow Quote/0 to pull current display data on demand (hourly).
+**Purpose**: Allow iPhone app or PC to create events, with immediate Quote/0 update.
 
-**Use Case**: Backup mechanism if scheduled push fails, or for manual refresh.
+**Authorization**: `Authorization: Bearer <API_AUTH_TOKEN>` header required.
 
 **Process Flow**:
 ```
-1. Quote/0 sends GET request
-2. Fetch bin collection data (cached if available)
-3. Query database for today's events
-4. Format and return display JSON
-5. Quote/0 receives and displays data
+1. Validate Authorization header
+2. Parse and validate request body
+3. Upsert event to DynamoDB (update if exists for date, create if new)
+4. Query tomorrow's bins from DB
+5. Query today's events from DB
+6. Format and push display data to Quote/0
+7. Return created event with quote0_updated status
 ```
 
-**Response Time**: < 500ms (typical)
+**Response**: 201 Created (success), 401 (no auth), 403 (bad token), 400/422 (validation error)
 
-### 3. PUT /api/events Endpoint
+### 3. POST /api/events/batch Endpoint
 
-**Purpose**: Allow iPhone app to create new events.
+**Purpose**: Create multiple events (up to 100) in a single API call.
+
+**Authorization**: `Authorization: Bearer <API_AUTH_TOKEN>` header required.
 
 **Process Flow**:
 ```
-1. iPhone app sends PUT request with date and event
-2. Validate input:
-   - date format (YYYY/MM/DD or YYYY-MM-DD)
-   - event text (not empty, reasonable length)
-3. Insert record to database
-4. Return success response
+1. Validate Authorization header
+2. Parse and validate all events in batch
+3. Upsert each event to DynamoDB
+4. Query tomorrow's bins from DB
+5. Query today's events from DB
+6. Format and push display data to Quote/0
+7. Return batch results with succeeded/failed counts
 ```
 
-**Response**: 201 Created (success) or 400/422 (validation error)
+**Response**: 201 (all success), 207 (partial), 401 (no auth), 403 (bad token), 400/422 (validation)
 
 ### 4. Bin Collection Service
 
 **Responsibilities**:
 - Fetch bin collection schedule from Reading Council API
-- Filter for tomorrow's collections
-- Map service names to user-friendly format
-- Cache results to minimize API calls
+- Return raw collection data for storage
 
-**Caching Strategy**:
-- Cache duration: 12 hours
-- Cache key: `bin_collections:{uprn}:{date}`
-- Invalidation: Automatic after TTL
+### 5. Bin Collection DB Service
+
+**Responsibilities**:
+- Store bin collections in DynamoDB `bin_collection` table
+- Query collections by date
+- Get tomorrow's collections with friendly name mapping
 
 **Service Mapping**:
 ```javascript
@@ -175,15 +191,15 @@ Quote0 API is a lightweight microservice designed to aggregate and display daily
 }
 ```
 
-### 5. Event Service
+### 6. DynamoDB Service (Events)
 
 **Responsibilities**:
 - Query events for specific date
-- Create new events
-- Validate event data
-- Format events for display
+- Create, update, and upsert events
+- Batch event creation
+- Health check
 
-**DynamoDB Table Schema**:
+**Events Table Schema**:
 ```
 Table Name: quote0-api-{stage}-events
 Partition Key: date (String, YYYY-MM-DD)
@@ -191,250 +207,194 @@ Sort Key: id (String, UUID)
 Attributes:
   - event (String): Event description
   - created_at (String): ISO 8601 timestamp
+  - updated_at (String): ISO 8601 timestamp (if updated)
   - ttl (Number): Unix timestamp for auto-deletion (90 days)
 Billing Mode: PAY_PER_REQUEST (on-demand)
 ```
 
-### 6. Display Formatter
+### 7. Display Formatter
 
 **Responsibilities**:
 - Format data to match Quote/0 display constraints
+- Combine bin collection reminders and events into message
 - Enforce character limits
-- Handle line breaks
-- Generate bin collection signature
+- Sanitize special characters (e.g., `&` -> `+`)
 
-**Display Constraints**:
-- Title: 25 characters (date: "YYYY/MM/DD" = 10 chars)
-- Message: 3 lines × 27 characters = 81 characters total + 2 line breaks
-- Signature: 29 characters (bin reminder)
-
-**Formatting Logic**:
-```
-Title:     "2026/02/10"
-Message:   "AE Maths 3 upto page 63\nclass book week 20\nAE VR 3 chapter letter codes"
-Signature: "collect Food waste, Red bin tmr"
-```
-
-### 7. Quote/0 Client
+### 8. Quote/0 Client
 
 **Responsibilities**:
-- Send formatted display data to Quote/0 text API
+- Send formatted display data to Quote/0 Text API
+- Include `Authorization: Bearer <QUOTE0_AUTH_TOKEN>` header
 - Handle connection errors
 - Retry logic for failed requests
-- Logging
-
-**Quote/0 Text API Format**:
-```json
-{
-  "refreshNow": false,
-  "title": "2026/02/10",
-  "signature": "collect Food waste, Red bin tmr",
-  "message": "Line 1\nLine 2\nLine 3"
-}
-```
 
 ## Data Flow
 
 ### Scheduled Update Flow
 
 ```
-Cron Trigger (e.g., 07:10)
-    ↓
+EventBridge Trigger (01:10 UTC)
+    |
 Scheduled Service Handler
-    ↓
-    ├─→ Bin Collection Service
-    │       ↓
-    │   Reading Council API
-    │       ↓
-    │   [Filter tomorrow's collections]
-    │       ↓
-    │   [Map service names]
-    │       ↓
-    │   Return: ["Red bin", "Food waste"]
-    │
-    └─→ Event Service
-            ↓
-        Database Query (WHERE date = TODAY)
-            ↓
+    |
+    +--> Bin Collection Service
+    |       |
+    |   Reading Council API
+    |       |
+    |   [Fetch all upcoming collections]
+    |       |
+    +--> Bin Collection DB Service
+    |       |
+    |   [Store in DynamoDB bin_collection table]
+    |       |
+    |   [Query tomorrow's collections]
+    |       |
+    |   Return: [{service: "Red bin"}, {service: "Food waste"}]
+    |
+    +--> DynamoDB Service
+            |
+        Query events WHERE date = TODAY
+            |
         Return: [event1, event2, ...]
-            ↓
+            |
 Display Formatter
-    ↓
-    [Generate title: "2026/02/10"]
-    [Generate message: event1\nevent2\nevent3]
-    [Generate signature: "collect Red bin, Food waste tmr"]
-    ↓
-Quote/0 Client
-    ↓
+    |
+    [Generate date: "2026/02/10"]
+    [Generate message: "collect Red bin tmr\nevent1\nevent2"]
+    |
+Quote/0 Client (with Bearer auth)
+    |
 POST to Quote/0 Text API
-    ↓
+    |
 Quote/0 Device Display Updated
 ```
 
-### On-Demand Pull Flow (GET /api/display)
+### Event Creation Flow (POST /api/events)
 
 ```
-Quote/0 Device (hourly)
-    ↓
-GET /api/display
-    ↓
-API Handler
-    ↓
-    [Check cache for bin data]
-    [Query today's events]
-    ↓
-Display Formatter
-    ↓
-Return JSON Response
-    ↓
-Quote/0 Device Displays Data
-```
-
-### Event Creation Flow (PUT /api/events)
-
-```
-iPhone App
-    ↓
-PUT /api/events
+iPhone App / PC
+    |
+POST /api/events
+Headers: Authorization: Bearer <API_AUTH_TOKEN>
 Body: { date: "2026/02/10", event: "Dentist 3pm" }
-    ↓
+    |
+Authorization Check
+    |
+    [Validate Bearer token]
+    |
 Validation
-    ↓
+    |
     [Validate date format]
-    [Validate event not empty]
-    [Check date is not in past]
-    ↓
-Insert to Database
-    ↓
-Return 201 Created
-    ↓
-iPhone App Shows Success
+    [Validate event text length]
+    |
+Upsert to DynamoDB
+    |
+    [Update if event exists for date, create if new]
+    |
+Query bins + events, format, push to Quote/0
+    |
+Return 201 Created with quote0_updated: true
 ```
 
 ## Technology Stack
 
 ### Runtime
-- **Node.js 18+** with AWS Lambda
-- **Serverless Framework** for deployment
+- **Node.js 18** with AWS Lambda
+- **Serverless Framework v3** for deployment and infrastructure
 
 ### Database
 - **Amazon DynamoDB** (serverless, pay-per-request)
-  - No connection management required
+  - `events` table: User-created events
+  - `bin_collection` table: Bin collection schedules
   - Auto-scaling and high availability
-  - Perfect for key-value lookups by date
+  - TTL for automatic data cleanup (90 days)
 
-### Hosting
-- **AWS Lambda** with EventBridge (serverless, recommended)
-- **API Gateway HTTP API** for REST endpoints
-- **DynamoDB** for data persistence
+### API
+- **AWS API Gateway HTTP API** for REST endpoints
+- **Bearer token authorization** on all HTTP endpoints
+
+### Scheduling
+- **AWS EventBridge** for cron-based scheduling (01:10 UTC daily)
 
 ### External APIs
 - **Reading Council API**: Public REST API (no auth required)
-- **Quote/0 Text API**: Device-specific endpoint
-
-### Scheduling
-- **AWS EventBridge** (for Lambda)
-- **node-cron** (for Node.js server)
-- **APScheduler** (for Python server)
-- **System cron** (for Linux server)
+- **Quote/0 Text API**: Device-specific endpoint (Bearer auth required)
 
 ## Deployment Architecture
 
-### AWS Lambda (Serverless Architecture)
-
 ```
 ┌─────────────────────────────────────────┐
-│  AWS EventBridge Rules                  │
-│  - 01:10 → Invoke Lambda                │
-│  - 07:10 → Invoke Lambda                │
-│  - 12:10 → Invoke Lambda                │
-│  - 17:10 → Invoke Lambda                │
+│  AWS EventBridge Rule                   │
+│  - 01:10 UTC -> Invoke Lambda           │
 └─────────────────┬───────────────────────┘
                   │
-                  ▼
+                  v
 ┌─────────────────────────────────────────┐
 │  AWS Lambda Functions                   │
 │  - scheduledUpdate handler              │
-│  - GET /api/display handler             │
-│  - PUT /api/events handler              │
+│  - POST /api/events handler             │
+│  - POST /api/events/batch handler       │
+│  - POST /test/scheduled-update (dev)    │
+│                                         │
+│  Authorization: Bearer <API_AUTH_TOKEN>  │
+│  (on HTTP endpoints only)               │
 └─────────────────┬───────────────────────┘
                   │
-                  ├─→ DynamoDB (Events Table)
-                  │
-                  └─→ External APIs
+                  ├--> DynamoDB (events table)
+                  ├--> DynamoDB (bin_collection table)
+                  └--> External APIs (Reading Council, Quote/0)
 ```
-
-### Cost Comparison: Lambda vs Traditional Server
-
-| Feature | AWS Lambda + DynamoDB | Traditional Server |
-|---------|----------------------|-------------------|
-| **Monthly Cost** | ~$1.18 | ~$5-50 |
-| **Scaling** | Automatic | Manual |
-| **Maintenance** | None | OS updates, security patches |
-| **Database** | DynamoDB (managed) | Self-managed PostgreSQL |
-| **Connection Mgmt** | Not needed | Connection pooling required |
 
 ## Scalability & Performance
 
 ### Current Scale
 - **Users**: 1 household
-- **Requests**: 
-  - Scheduled: 4 updates/day
-  - On-demand: ~24 requests/day (hourly)
-  - Event creation: ~5 requests/day
-- **Total**: ~35 requests/day
+- **Requests**:
+  - Scheduled: 1 update/day
+  - Event creation: ~5-10 requests/day
+- **Total**: ~10-15 requests/day
 
 ### Performance Targets
-- GET /api/display: < 500ms response time
-- PUT /api/events: < 200ms response time
-- Scheduled update: Complete within 30 seconds
-- Uptime: 99.9%
-
-### Optimization Strategies
-1. **Caching**: Cache bin collection data (12 hours)
-2. **Database Indexing**: Index on date column
-3. **Connection Pooling**: Reuse database connections
-4. **Timeout Handling**: 5-second timeout for external APIs
+- POST /api/events: < 2s response time (includes Quote/0 push)
+- POST /api/events/batch: < 5s response time
+- Scheduled update: Complete within 60 seconds
 
 ## Error Handling
 
 ### Bin Collection API Failure
-- **Strategy**: Use cached data if available
+- **Strategy**: Use cached data from DynamoDB (previous fetch)
 - **Fallback**: Skip bin signature if no data available
-- **Logging**: Log error for investigation
 - **User Impact**: Minimal (signature just won't show)
 
 ### Database Failure
-- **Strategy**: Retry once after 1 second delay
-- **Fallback**: Return error response
+- **Strategy**: Return error response
 - **Logging**: Critical error alert
 - **User Impact**: No display update (retry at next schedule)
 
 ### Quote/0 Device Unreachable
 - **Strategy**: Retry 3 times with exponential backoff
-- **Fallback**: Log failure, wait for next schedule/pull
-- **Logging**: Warning level log
+- **Fallback**: Log failure, wait for next schedule
 - **User Impact**: Device shows stale data until next successful update
 
-## Security Considerations
+## Security
 
-### API Security
-- **Rate Limiting**: 100 requests/hour per IP (for PUT endpoint)
-- **Input Validation**: Strict validation on all inputs
-- **SQL Injection Prevention**: Use parameterized queries
-- **HTTPS**: All API calls over HTTPS
+### API Authorization
+- **Bearer Token**: All HTTP endpoints require `Authorization: Bearer <API_AUTH_TOKEN>`
+- **401 Unauthorized**: Missing Authorization header
+- **403 Forbidden**: Invalid token
+- **Scheduled triggers**: No auth needed (internal EventBridge)
+- **Local dev**: Auth skipped if `API_AUTH_TOKEN` is empty
 
-### Database Security
-- **Access Control**: Database user has minimal required permissions
-- **Connection Security**: Encrypted connections (SSL/TLS)
-- **Backups**: Daily automated backups
+### Outbound Authentication
+- **Quote/0 Text API**: `Authorization: Bearer <QUOTE0_AUTH_TOKEN>`
 
-### Secrets Management
-- **Environment Variables**: Store sensitive config in .env
-- **AWS Secrets Manager**: For Lambda deployment
-- **No Hardcoded Secrets**: Never commit credentials to repo
+### Infrastructure Security
+- **IAM roles**: Minimal required permissions for Lambda
+- **DynamoDB**: Encryption at rest
+- **HTTPS**: All API Gateway traffic over HTTPS
+- **Secrets**: Environment variables, never hardcoded
 
 ---
 
-For API details, see [02-api-reference.md](./02-api-reference.md).  
+For API details, see [02-api-reference.md](./02-api-reference.md).
 For scheduled service implementation, see [03-scheduled-service.md](./03-scheduled-service.md).

@@ -57,6 +57,9 @@ QUOTE0_AUTH_TOKEN=dot_app_vIZLxXhUslczaOeikfAnIACvYZmHTUCprHVIioquiVIFYUKeEihDXR
 READING_API_URL=https://api.reading.gov.uk/api/collections
 READING_API_TIMEOUT=5000
 CACHE_TTL_HOURS=12
+
+# API Authorization (protects your HTTP endpoints)
+API_AUTH_TOKEN=your-secret-api-key
 ```
 
 ### Step 2: Deploy Updated Code
@@ -209,15 +212,17 @@ npm run logs
 ## 📱 iPhone App Integration
 
 When your iPhone app creates an event via `POST /api/events`:
-1. Event is saved to DynamoDB
-2. System immediately queries bins and events
-3. **Pushes update to Quote/0 device automatically**
-4. Returns response with `quote0_updated: true`
+1. Request is authorized (Bearer token check)
+2. Event is saved to DynamoDB
+3. System immediately queries bins and events
+4. **Pushes update to Quote/0 device automatically**
+5. Returns response with `quote0_updated: true`
 
 **Example**:
 ```bash
 curl -X POST https://your-api.com/api/events \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{
     "date": "2026/02/10",
     "event": "Dentist appointment 3pm"

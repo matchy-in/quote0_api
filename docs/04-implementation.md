@@ -2,903 +2,280 @@
 
 ## Overview
 
-This guide provides step-by-step instructions to implement the Quote0 API microservice from scratch.
+This guide covers the implementation details of the Quote0 API serverless microservice, built with AWS Lambda, DynamoDB, and the Serverless Framework.
 
 ---
 
 ## Prerequisites
 
-- **Node.js** 18+ (or Python 3.9+)
-- **Database**: PostgreSQL, MySQL, or SQLite
+- **Node.js 18+** installed
+- **AWS Account** with CLI configured
+- **Serverless Framework** installed globally (`npm install -g serverless`)
 - **Git** for version control
-- **Text editor**: VS Code, Vim, or your preference
-- **Terminal** access
+
+---
+
+## Project Structure
+
+```
+quote0_api/
+├── serverless.yml                    # AWS infrastructure definition
+├── package.json                      # Dependencies and npm scripts
+├── .env                              # Environment variables (not committed)
+├── .gitignore                        # Git ignore rules
+├── src/
+│   ├── lambda/
+│   │   └── handlers.js               # Lambda handlers with auth
+│   └── services/
+│       ├── dynamoDbService.js         # DynamoDB operations (events)
+│       ├── binCollectionDbService.js   # DynamoDB operations (bin collections)
+│       ├── binCollectionService.js     # Reading Council API client
+│       ├── displayFormatterService.js  # Quote/0 display formatting
+│       ├── quote0ClientService.js      # Quote/0 device API client
+│       └── scheduledUpdateService.js   # Scheduled update orchestration
+├── docs/                              # Documentation
+└── node_modules/                      # Dependencies (not committed)
+```
 
 ---
 
 ## Step 1: Project Setup
 
-### Create Project Structure
-
 ```bash
-# Create project directory
-mkdir quote0_api
+# Navigate to project
 cd quote0_api
 
-# Initialize Node.js project
-npm init -y
-
-# Create directory structure
-mkdir -p src/{services,handlers,config,scripts}
-mkdir -p database
-mkdir -p tests
-mkdir -p logs
-
-# Initialize git
-git init
-echo "node_modules/" > .gitignore
-echo ".env" >> .gitignore
-echo "logs/" >> .gitignore
-echo "*.log" >> .gitignore
+# Install dependencies
+npm install
 ```
 
-**Final Structure**:
-```
-quote0_api/
-├── src/
-│   ├── services/           # Business logic services
-│   ├── handlers/           # API route handlers
-│   ├── config/             # Configuration files
-│   ├── scripts/            # Utility scripts
-│   ├── app.js              # Main Express app
-│   └── scheduler.js        # Cron scheduler
-├── database/
-│   └── schema.sql          # Database schema
-├── tests/                  # Unit tests
-├── logs/                   # Application logs
-├── .env                    # Environment variables
-├── .env.example            # Environment template
-├── package.json
-└── README.md
-```
+### Dependencies
 
-### Install Dependencies
+**Production:**
+- `@aws-sdk/client-dynamodb` - DynamoDB client (v3)
+- `@aws-sdk/lib-dynamodb` - Document client wrapper
+- `axios` - HTTP client for external APIs
+- `uuid` - Unique ID generation
 
-```bash
-# Core dependencies
-npm install express body-parser dotenv axios pg node-cron
-
-# Development dependencies
-npm install --save-dev nodemon jest supertest
-```
-
-**package.json** scripts:
-```json
-{
-  "scripts": {
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
-    "test": "jest",
-    "db:setup": "node src/scripts/db-setup.js"
-  }
-}
-```
+**Development:**
+- `dotenv` - Environment variable management
+- `serverless-offline` - Local development server
 
 ---
 
-## Step 2: Configuration
+## Step 2: Environment Configuration
 
-### Environment Variables
+Create a `.env` file in the project root:
 
-Create **`.env.example`**:
-```env
-# Server
-NODE_ENV=development
-PORT=8080
-HOST=0.0.0.0
-
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=quote0_db
-DB_USER=quote0_user
-DB_PASSWORD=your_password_here
-
-# External APIs
+```bash
+# Reading Council UPRN
 UPRN=310022781
+
+# Quote/0 Device API
+QUOTE0_TEXT_API=https://dot.mindreset.tech/api/authV2/open/device/YOUR_DEVICE_ID/text
+QUOTE0_AUTH_TOKEN=your_quote0_bearer_token
+
+# API Authorization (protects your endpoints)
+API_AUTH_TOKEN=your-secret-api-key
+
+# Reading Council API
 READING_API_URL=https://api.reading.gov.uk/api/collections
 READING_API_TIMEOUT=5000
-
-# Quote/0 Device
-QUOTE0_TEXT_API=http://your-quote0-device-ip/text-api
-
-# Cache
 CACHE_TTL_HOURS=12
 ```
 
-Create **`.env`** (copy from example and fill in actual values):
-```bash
-cp .env.example .env
-# Edit .env with actual values
+---
+
+## Step 3: Infrastructure (serverless.yml)
+
+The `serverless.yml` file defines all AWS resources:
+
+### Lambda Functions
+
+| Function | Handler | Trigger | Auth |
+|----------|---------|---------|------|
+| `createEvent` | `src/lambda/handlers.createEvent` | POST /api/events | Bearer token |
+| `createEventsBatch` | `src/lambda/handlers.createEventsBatch` | POST /api/events/batch | Bearer token |
+| `scheduledUpdate` | `src/lambda/handlers.scheduledUpdate` | EventBridge cron (01:10 UTC) | None (internal) |
+| `testScheduledUpdate` | `src/lambda/handlers.scheduledUpdate` | POST /test/scheduled-update | Bearer token |
+
+### DynamoDB Tables
+
+**Events Table:**
+- Partition Key: `date` (String, YYYY-MM-DD)
+- Sort Key: `id` (String, UUID)
+- TTL: `ttl` attribute (auto-delete after 90 days)
+
+**Bin Collection Table:**
+- Partition Key: `date` (String, YYYY-MM-DD)
+- Sort Key: `service` (String, service name)
+- TTL: `ttl` attribute (auto-delete after 90 days)
+
+### EventBridge Schedule
+- 01:10 UTC daily: `cron(10 1 * * ? *)`
+
+---
+
+## Step 4: Lambda Handlers (src/lambda/handlers.js)
+
+The handlers file contains:
+
+1. **`authorize(event)`** - Validates Bearer token from Authorization header
+2. **`createEvent(event)`** - Creates/upserts a single event, then pushes to Quote/0
+3. **`createEventsBatch(event)`** - Creates multiple events in batch, then pushes to Quote/0
+4. **`scheduledUpdate(event)`** - Daily scheduled sync of bins and display push
+
+### Authorization Flow
+
 ```
-
-### Configuration Module
-
-Create **`src/config/config.js`**:
-```javascript
-require('dotenv').config();
-
-module.exports = {
-  server: {
-    port: process.env.PORT || 8080,
-    host: process.env.HOST || '0.0.0.0',
-    env: process.env.NODE_ENV || 'development'
-  },
-  
-  database: {
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT) || 5432,
-    database: process.env.DB_NAME || 'quote0_db',
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD
-  },
-  
-  readingApi: {
-    uprn: process.env.UPRN || '310022781',
-    baseUrl: process.env.READING_API_URL || 'https://api.reading.gov.uk/api/collections',
-    timeout: parseInt(process.env.READING_API_TIMEOUT) || 5000
-  },
-  
-  quote0: {
-    textApiUrl: process.env.QUOTE0_TEXT_API,
-    maxTitleLength: 25,
-    maxLineLength: 29,
-    maxLines: 3
-  },
-  
-  cache: {
-    ttlHours: parseInt(process.env.CACHE_TTL_HOURS) || 12
-  }
-};
+Request arrives
+    |
+    v
+authorize(event)
+    |
+    +--> No API_AUTH_TOKEN set? -> Skip auth (local dev)
+    |
+    +--> No Authorization header? -> Return 401
+    |
+    +--> Extract token from "Bearer <token>"
+    |
+    +--> Token matches API_AUTH_TOKEN? -> Continue
+    |
+    +--> Token doesn't match? -> Return 403
 ```
 
 ---
 
-## Step 3: Database Setup
+## Step 5: Service Layer
 
-### Create Schema
+### DynamoDB Service (dynamoDbService.js)
 
-Create **`database/schema.sql`**:
-```sql
--- Events table
-CREATE TABLE IF NOT EXISTS events (
-    id SERIAL PRIMARY KEY,
-    date DATE NOT NULL,
-    event TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
+Handles all event operations:
 
--- Index for fast date-based queries
-CREATE INDEX IF NOT EXISTS idx_events_date ON events(date);
+| Method | Description |
+|--------|-------------|
+| `getEventsByDate(date)` | Query events for a specific date |
+| `createEvent(date, eventText)` | Create a new event with UUID |
+| `updateEvent(date, id, eventText)` | Update an existing event |
+| `upsertEvent(date, eventText)` | Update if exists, create if not |
+| `createEventsBatch(events)` | Create multiple events sequentially |
+| `healthCheck()` | Verify DynamoDB connection |
 
--- Optional: Cache table (alternative to in-memory cache)
-CREATE TABLE IF NOT EXISTS cache (
-    key VARCHAR(255) PRIMARY KEY,
-    value TEXT NOT NULL,
-    expires_at TIMESTAMP NOT NULL
-);
+### Bin Collection DB Service (binCollectionDbService.js)
 
-CREATE INDEX IF NOT EXISTS idx_cache_expires ON cache(expires_at);
-```
+Handles bin collection storage:
 
-### Database Setup Script
+| Method | Description |
+|--------|-------------|
+| `storeBinCollections(collections)` | Upsert collections from Reading API |
+| `getBinCollectionsByDate(date)` | Query collections for a date |
+| `getTomorrowCollections()` | Get tomorrow's collections |
 
-Create **`src/scripts/db-setup.js`**:
-```javascript
-const fs = require('fs');
-const { Pool } = require('pg');
-const config = require('../config/config');
+### Bin Collection Service (binCollectionService.js)
 
-async function setupDatabase() {
-  const pool = new Pool(config.database);
-  
-  try {
-    console.log('Connecting to database...');
-    const client = await pool.connect();
-    
-    console.log('Reading schema file...');
-    const schema = fs.readFileSync('./database/schema.sql', 'utf8');
-    
-    console.log('Executing schema...');
-    await client.query(schema);
-    
-    console.log('✅ Database setup complete!');
-    
-    client.release();
-  } catch (error) {
-    console.error('❌ Database setup failed:', error);
-    process.exit(1);
-  } finally {
-    await pool.end();
-  }
-}
+Fetches data from Reading Council API:
 
-setupDatabase();
-```
+| Method | Description |
+|--------|-------------|
+| `fetchBinCollections()` | Fetch upcoming collections from API |
 
-**Run setup**:
-```bash
-npm run db:setup
-```
+### Display Formatter Service (displayFormatterService.js)
+
+Formats data for Quote/0 device:
+
+| Method | Description |
+|--------|-------------|
+| `formatDisplayFromDb(events, binCollections)` | Format display data from DB objects |
+| `sanitizeForQuote0(text)` | Replace unsupported characters |
+
+### Quote/0 Client Service (quote0ClientService.js)
+
+Pushes updates to Quote/0 device:
+
+| Method | Description |
+|--------|-------------|
+| `updateDisplay(displayData)` | POST to Quote/0 Text API with Bearer auth |
+
+### Scheduled Update Service (scheduledUpdateService.js)
+
+Orchestrates the daily update:
+
+| Method | Description |
+|--------|-------------|
+| `executeUpdate()` | Run full update cycle (fetch, store, format, push) |
 
 ---
 
-## Step 4: Implement Core Services
+## Step 6: Local Development
 
-### Database Service
-
-Create **`src/services/databaseService.js`**:
-```javascript
-const { Pool } = require('pg');
-const config = require('../config/config');
-
-const pool = new Pool(config.database);
-
-class DatabaseService {
-  async query(text, params) {
-    const start = Date.now();
-    try {
-      const result = await pool.query(text, params);
-      const duration = Date.now() - start;
-      console.log('Database query executed:', { text, duration, rows: result.rowCount });
-      return result;
-    } catch (error) {
-      console.error('Database query error:', error);
-      throw error;
-    }
-  }
-
-  async getEventsByDate(date) {
-    const result = await this.query(
-      'SELECT * FROM events WHERE date = $1 ORDER BY id ASC',
-      [date]
-    );
-    return result.rows;
-  }
-
-  async createEvent(date, event) {
-    const result = await this.query(
-      'INSERT INTO events (date, event) VALUES ($1, $2) RETURNING *',
-      [date, event]
-    );
-    return result.rows[0];
-  }
-
-  async close() {
-    await pool.end();
-  }
-}
-
-module.exports = new DatabaseService();
-```
-
-### Bin Collection Service
-
-Create **`src/services/binCollectionService.js`**:
-```javascript
-const axios = require('axios');
-const config = require('../config/config');
-
-// Simple in-memory cache
-let cache = {
-  data: null,
-  timestamp: null
-};
-
-const SERVICE_MAPPING = {
-  'Domestic Waste Collection Service': 'Grey bin',
-  'Recycling Collection Service': 'Red bin',
-  'Food Waste Collection Service': 'Food waste'
-};
-
-class BinCollectionService {
-  async fetchCollections() {
-    // Check cache
-    if (this.isCacheValid()) {
-      console.log('Using cached bin collection data');
-      return cache.data;
-    }
-
-    try {
-      const url = `${config.readingApi.baseUrl}/${config.readingApi.uprn}`;
-      console.log('Fetching bin collections from:', url);
-
-      const response = await axios.get(url, {
-        timeout: config.readingApi.timeout,
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'Quote0-API/1.0'
-        }
-      });
-
-      if (!response.data.success) {
-        throw new Error('API returned unsuccessful response');
-      }
-
-      const collections = response.data.collections;
-      
-      // Update cache
-      cache = {
-        data: collections,
-        timestamp: Date.now()
-      };
-
-      console.log(`Fetched ${collections.length} bin collections`);
-      return collections;
-    } catch (error) {
-      console.error('Failed to fetch bin collections:', error.message);
-      
-      // Return cached data even if expired
-      if (cache.data) {
-        console.warn('Using expired cache due to API failure');
-        return cache.data;
-      }
-      
-      throw error;
-    }
-  }
-
-  async getTomorrowCollections() {
-    try {
-      const collections = await this.fetchCollections();
-      const tomorrow = this.getTomorrowDate();
-      
-      const tomorrowCollections = collections
-        .filter(c => this.parseDate(c.date).toDateString() === tomorrow.toDateString())
-        .map(c => ({
-          service: SERVICE_MAPPING[c.service] || c.service,
-          originalService: c.service,
-          date: c.date,
-          day: c.day
-        }));
-
-      console.log(`Found ${tomorrowCollections.length} collections for tomorrow`);
-      return tomorrowCollections;
-    } catch (error) {
-      console.error('Error getting tomorrow collections:', error);
-      return []; // Return empty array on failure
-    }
-  }
-
-  parseDate(dateString) {
-    // Parse "03/02/2026 00:00:00" format
-    const [datePart] = dateString.split(' ');
-    const [day, month, year] = datePart.split('/');
-    return new Date(year, month - 1, day);
-  }
-
-  getTomorrowDate() {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    tomorrow.setHours(0, 0, 0, 0);
-    return tomorrow;
-  }
-
-  isCacheValid() {
-    if (!cache.data || !cache.timestamp) {
-      return false;
-    }
-    
-    const age = Date.now() - cache.timestamp;
-    const maxAge = config.cache.ttlHours * 60 * 60 * 1000;
-    return age < maxAge;
-  }
-}
-
-module.exports = new BinCollectionService();
-```
-
-### Display Formatter Service
-
-Create **`src/services/displayFormatterService.js`**:
-```javascript
-const config = require('../config/config');
-
-class DisplayFormatterService {
-  formatDisplay(events, binCollections) {
-    const title = this.formatTitle();
-    const message = this.formatMessage(events);
-    const signature = this.formatSignature(binCollections);
-
-    return {
-      refreshNow: false,
-      title,
-      message,
-      signature
-    };
-  }
-
-  formatTitle() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const day = String(now.getDate()).padStart(2, '0');
-    
-    return `${year}/${month}/${day}`;
-  }
-
-  formatMessage(events) {
-    const lines = [];
-    
-    // Process up to 3 events
-    for (let i = 0; i < Math.min(events.length, config.quote0.maxLines); i++) {
-      const eventText = events[i].event || '';
-      
-      // Split event text by newlines
-      const eventLines = eventText.split('\n');
-      
-      for (const line of eventLines) {
-        if (lines.length >= config.quote0.maxLines) break;
-        
-        // Truncate line to max length
-        const truncated = line.substring(0, config.quote0.maxLineLength);
-        lines.push(truncated);
-      }
-      
-      if (lines.length >= config.quote0.maxLines) break;
-    }
-    
-    // Pad with empty lines if needed
-    while (lines.length < config.quote0.maxLines) {
-      lines.push('');
-    }
-    
-    return lines.join('\n');
-  }
-
-  formatSignature(binCollections) {
-    if (binCollections.length === 0) {
-      return '';
-    }
-
-    const binNames = binCollections.map(bc => bc.service);
-    const binsText = binNames.join(', ');
-    const signature = `collect ${binsText} tmr`;
-
-    // Truncate to max length
-    return signature.substring(0, config.quote0.maxLineLength);
-  }
-}
-
-module.exports = new DisplayFormatterService();
-```
-
-### Quote/0 Client Service
-
-Create **`src/services/quote0ClientService.js`**:
-```javascript
-const axios = require('axios');
-const config = require('../config/config');
-
-class Quote0ClientService {
-  async updateDisplay(displayData, attempt = 1) {
-    if (!config.quote0.textApiUrl) {
-      console.warn('Quote/0 text API URL not configured, skipping device update');
-      return;
-    }
-
-    try {
-      console.log('Sending update to Quote/0:', displayData);
-      
-      await axios.post(config.quote0.textApiUrl, displayData, {
-        timeout: 10000,
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      console.log('✅ Successfully updated Quote/0 display');
-    } catch (error) {
-      console.error(`Failed to update Quote/0 (attempt ${attempt}):`, error.message);
-      
-      if (attempt < 3) {
-        const delay = Math.pow(2, attempt) * 1000;
-        console.log(`Retrying in ${delay}ms...`);
-        await this.sleep(delay);
-        return await this.updateDisplay(displayData, attempt + 1);
-      }
-      
-      console.error('❌ Failed to update Quote/0 after 3 attempts');
-      // Don't throw - device can pull via GET endpoint
-    }
-  }
-
-  sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-}
-
-module.exports = new Quote0ClientService();
-```
-
-### Scheduled Update Service
-
-Create **`src/services/scheduledUpdateService.js`**:
-```javascript
-const binCollectionService = require('./binCollectionService');
-const databaseService = require('./databaseService');
-const displayFormatterService = require('./displayFormatterService');
-const quote0ClientService = require('./quote0ClientService');
-
-class ScheduledUpdateService {
-  async executeUpdate() {
-    const startTime = Date.now();
-    console.log('='.repeat(80));
-    console.log(`[${new Date().toISOString()}] Scheduled update starting...`);
-    console.log('='.repeat(80));
-
-    try {
-      // Step 1: Fetch tomorrow's bin collections
-      const binCollections = await binCollectionService.getTomorrowCollections();
-
-      // Step 2: Query today's events
-      const today = new Date().toISOString().split('T')[0];
-      const events = await databaseService.getEventsByDate(today);
-      console.log(`Found ${events.length} events for today`);
-
-      // Step 3: Format display data
-      const displayData = displayFormatterService.formatDisplay(events, binCollections);
-      console.log('Display data formatted:', JSON.stringify(displayData, null, 2));
-
-      // Step 4: Push to Quote/0
-      await quote0ClientService.updateDisplay(displayData);
-
-      const duration = Date.now() - startTime;
-      console.log('='.repeat(80));
-      console.log(`[${new Date().toISOString()}] ✅ Update completed in ${duration}ms`);
-      console.log('='.repeat(80));
-
-      return { success: true, duration };
-    } catch (error) {
-      const duration = Date.now() - startTime;
-      console.error('='.repeat(80));
-      console.error(`[${new Date().toISOString()}] ❌ Update failed after ${duration}ms`);
-      console.error('Error:', error.message);
-      console.error('Stack:', error.stack);
-      console.error('='.repeat(80));
-
-      return { success: false, error: error.message };
-    }
-  }
-}
-
-module.exports = new ScheduledUpdateService();
-```
-
----
-
-## Step 5: Implement API Handlers
-
-### GET /api/display Handler
-
-Create **`src/handlers/displayHandler.js`**:
-```javascript
-const binCollectionService = require('../services/binCollectionService');
-const databaseService = require('../services/databaseService');
-const displayFormatterService = require('../services/displayFormatterService');
-
-async function getDisplay(req, res) {
-  try {
-    console.log('[GET /api/display] Request received');
-
-    // Fetch tomorrow's bin collections
-    const binCollections = await binCollectionService.getTomorrowCollections();
-
-    // Query today's events
-    const today = new Date().toISOString().split('T')[0];
-    const events = await databaseService.getEventsByDate(today);
-
-    // Format display data
-    const displayData = displayFormatterService.formatDisplay(events, binCollections);
-
-    console.log('[GET /api/display] Response:', displayData);
-    res.json(displayData);
-  } catch (error) {
-    console.error('[GET /api/display] Error:', error);
-    res.status(500).json({
-      error: 'Internal server error',
-      message: 'Failed to fetch display data'
-    });
-  }
-}
-
-module.exports = { getDisplay };
-```
-
-### PUT /api/events Handler
-
-Create **`src/handlers/eventsHandler.js`**:
-```javascript
-const databaseService = require('../services/databaseService');
-
-function validateDate(dateString) {
-  // Accept YYYY/MM/DD or YYYY-MM-DD
-  const regex1 = /^\d{4}\/\d{2}\/\d{2}$/;
-  const regex2 = /^\d{4}-\d{2}-\d{2}$/;
-  
-  if (!regex1.test(dateString) && !regex2.test(dateString)) {
-    return false;
-  }
-  
-  // Parse and validate date
-  const normalizedDate = dateString.replace(/\//g, '-');
-  const date = new Date(normalizedDate);
-  return date instanceof Date && !isNaN(date);
-}
-
-function normalizeDate(dateString) {
-  // Convert YYYY/MM/DD to YYYY-MM-DD
-  return dateString.replace(/\//g, '-');
-}
-
-async function createEvent(req, res) {
-  try {
-    console.log('[PUT /api/events] Request:', req.body);
-
-    const { date, event } = req.body;
-
-    // Validation
-    if (!date) {
-      return res.status(400).json({
-        error: 'Bad Request',
-        message: 'Missing required field: date'
-      });
-    }
-
-    if (!event) {
-      return res.status(400).json({
-        error: 'Bad Request',
-        message: 'Missing required field: event'
-      });
-    }
-
-    if (!validateDate(date)) {
-      return res.status(400).json({
-        error: 'Bad Request',
-        message: 'Invalid date format. Use YYYY/MM/DD or YYYY-MM-DD'
-      });
-    }
-
-
-    if (event.length > 81) {
-      return res.status(422).json({
-        error: 'Unprocessable Entity',
-        message: 'Event text exceeds maximum length of 81 characters'
-      });
-    }
-
-    // Normalize date format
-    const normalizedDate = normalizeDate(date);
-
-    // Create event
-    const createdEvent = await databaseService.createEvent(normalizedDate, event);
-
-    console.log('[PUT /api/events] Event created:', createdEvent);
-    res.status(201).json(createdEvent);
-  } catch (error) {
-    console.error('[PUT /api/events] Error:', error);
-    res.status(500).json({
-      error: 'Internal Server Error',
-      message: 'Failed to create event'
-    });
-  }
-}
-
-module.exports = { createEvent };
-```
-
----
-
-## Step 6: Create Express App
-
-Create **`src/app.js`**:
-```javascript
-const express = require('express');
-const bodyParser = require('body-parser');
-const config = require('./config/config');
-const displayHandler = require('./handlers/displayHandler');
-const eventsHandler = require('./handlers/eventsHandler');
-
-const app = express();
-
-// Middleware
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
-
-// Request logging
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  next();
-});
-
-// Routes
-app.get('/api/display', displayHandler.getDisplay);
-app.put('/api/events', eventsHandler.createEvent);
-
-// Health check
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime()
-  });
-});
-
-// 404 handler
-app.use((req, res) => {
-  res.status(404).json({
-    error: 'Not Found',
-    message: `Route ${req.method} ${req.path} not found`
-  });
-});
-
-// Error handler
-app.use((err, req, res, next) => {
-  console.error('Unhandled error:', err);
-  res.status(500).json({
-    error: 'Internal Server Error',
-    message: err.message
-  });
-});
-
-module.exports = app;
-```
-
----
-
-## Step 7: Add Scheduler
-
-Create **`src/scheduler.js`**:
-```javascript
-const cron = require('node-cron');
-const scheduledUpdateService = require('./services/scheduledUpdateService');
-
-function startScheduler() {
-  console.log('Starting scheduler...');
-
-  // Schedule at 01:10, 07:10, 12:10, 17:10 daily
-  const times = ['1', '7', '12', '17'];
-
-  times.forEach(hour => {
-    cron.schedule(`10 ${hour} * * *`, async () => {
-      console.log(`\n🕐 Scheduled update triggered at ${hour}:10`);
-      await scheduledUpdateService.executeUpdate();
-    });
-  });
-
-  console.log('✅ Scheduler started: Updates at 01:10, 07:10, 12:10, 17:10');
-}
-
-module.exports = { startScheduler };
-```
-
----
-
-## Step 8: Create Main Entry Point
-
-Create **`src/index.js`**:
-```javascript
-const app = require('./app');
-const { startScheduler } = require('./scheduler');
-const config = require('./config/config');
-
-// Start scheduler
-startScheduler();
-
-// Start server
-const server = app.listen(config.server.port, config.server.host, () => {
-  console.log('='.repeat(80));
-  console.log(`🚀 Quote0 API server running`);
-  console.log(`   URL: http://${config.server.host}:${config.server.port}`);
-  console.log(`   Environment: ${config.server.env}`);
-  console.log(`   Scheduled updates: 01:10, 07:10, 12:10, 17:10`);
-  console.log('='.repeat(80));
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM signal received: closing HTTP server');
-  server.close(() => {
-    console.log('HTTP server closed');
-    process.exit(0);
-  });
-});
-```
-
-Update **`package.json`** to use `src/index.js`:
-```json
-{
-  "scripts": {
-    "start": "node src/index.js",
-    "dev": "nodemon src/index.js"
-  }
-}
-```
-
----
-
-## Step 9: Run and Test
-
-### Start Development Server
+### Run Locally with serverless-offline
 
 ```bash
-npm run dev
+# Start local server
+npm start
+# or
+npm run offline
 ```
 
-**Expected Output**:
-```
-================================================================================
-🚀 Quote0 API server running
-   URL: http://0.0.0.0:8080
-   Environment: development
-   Scheduled updates: 01:10, 07:10, 12:10, 17:10
-================================================================================
-Starting scheduler...
-✅ Scheduler started: Updates at 01:10, 07:10, 12:10, 17:10
-```
+This starts a local API Gateway at `http://localhost:3000`.
 
-### Test GET Endpoint
+### Test Endpoints Locally
 
 ```bash
-curl http://localhost:8080/api/display
-```
-
-**Expected Response**:
-```json
-{
-  "refreshNow": false,
-  "title": "2026/02/03",
-  "signature": "collect Red bin tmr",
-  "message": "\n\n"
-}
-```
-
-### Test PUT Endpoint
-
-```bash
-curl -X PUT http://localhost:8080/api/events \
+# Create event (include auth header if API_AUTH_TOKEN is set in .env)
+curl -X POST http://localhost:3000/api/events \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{"date":"2026/02/10","event":"Test event"}'
+
+# Create batch events
+curl -X POST http://localhost:3000/api/events/batch \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{
-    "date": "2026/02/10",
-    "event": "Dentist appointment 3pm"
+    "events": [
+      {"date":"2026/02/10","event":"Test 1"},
+      {"date":"2026/02/11","event":"Test 2"}
+    ]
   }'
+
+# Trigger scheduled update manually
+curl -X POST http://localhost:3000/test/scheduled-update
 ```
 
-**Expected Response**:
-```json
-{
-  "id": 1,
-  "date": "2026-02-10",
-  "event": "Dentist appointment 3pm",
-  "created_at": "2026-02-03T10:30:00.000Z"
-}
-```
-
-### Test Health Check
+### Test Scheduled Update Locally
 
 ```bash
-curl http://localhost:8080/health
+node test-scheduled-update.js
 ```
+
+---
+
+## Step 7: npm Scripts
+
+| Script | Command | Description |
+|--------|---------|-------------|
+| `start` | `serverless offline` | Start local dev server |
+| `offline` | `serverless offline` | Start local dev server |
+| `test:local` | `node test-scheduled-update.js` | Test scheduled update locally |
+| `deploy:dev` | `serverless deploy --stage dev` | Deploy to dev |
+| `deploy:prod` | `serverless deploy --stage prod` | Deploy to production |
+| `logs` | `serverless logs --function scheduledUpdate --stage dev --tail` | Tail scheduled update logs |
+| `logs:create` | `serverless logs --function createEvent --stage dev --tail` | Tail create event logs |
+| `logs:batch` | `serverless logs --function createEventsBatch --stage dev --tail` | Tail batch event logs |
+| `invoke` | `serverless invoke local --function scheduledUpdate` | Invoke scheduled update locally |
+| `remove:dev` | `serverless remove --stage dev` | Remove dev deployment |
+| `remove:prod` | `serverless remove --stage prod` | Remove prod deployment |
 
 ---
 
 ## Next Steps
 
-1. **Deploy to Production** - See [05-deployment.md](./05-deployment.md)
-2. **Configure Quote/0 Device** - Point to your API endpoint
-3. **Setup iPhone App** - Integrate with PUT /api/events
+1. **Deploy to AWS** - See [05-deployment.md](./05-deployment.md)
+2. **Configure Quote/0 Device** - See [QUOTE0-SETUP.md](../QUOTE0-SETUP.md)
+3. **Create Events** - Use POST /api/events or POST /api/events/batch
 4. **Monitor Logs** - Check scheduled update execution
 
 ---
 
-Your Quote0 API is now ready! 🎉
+Your Quote0 API is ready for deployment!

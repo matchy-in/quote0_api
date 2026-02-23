@@ -2,42 +2,20 @@
 
 ## Overview
 
-This guide covers deploying Quote0 API to production environments, including AWS Lambda (serverless) and traditional server deployments.
+This guide covers deploying the Quote0 API to AWS using the Serverless Framework. The project uses a fully serverless architecture with Lambda, DynamoDB, API Gateway, and EventBridge.
 
 ---
 
-## Deployment Options Comparison
+## Prerequisites
 
-| Feature | AWS Lambda | Traditional Server | Docker |
-|---------|-----------|-------------------|--------|
-| **Cost** | Pay per use (~$1-5/month) | Always-on (~$5-50/month) | Depends on hosting |
-| **Scaling** | Automatic | Manual | Depends on orchestration |
-| **Maintenance** | Minimal | Regular updates | Medium |
-| **Cold Starts** | Yes (1-3s) | No | No |
-| **Complexity** | Medium | Low | Medium |
-| **Best For** | Production (low traffic) | Development/Testing | Cloud VMs |
+- AWS account with CLI configured
+- Node.js 18+ installed
+- Serverless Framework installed (`npm install -g serverless`)
+- Project dependencies installed (`npm install`)
 
 ---
 
-## Option 1: AWS Lambda (Serverless) - Recommended
-
-### Prerequisites
-
-- AWS account
-- AWS CLI configured
-- Serverless Framework installed
-
-### Step 1: Install Serverless Framework
-
-```bash
-# Install globally
-npm install -g serverless
-
-# Verify
-serverless --version
-```
-
-### Step 2: Configure AWS Credentials
+## Step 1: Configure AWS Credentials
 
 ```bash
 # Configure AWS CLI
@@ -49,825 +27,338 @@ export AWS_SECRET_ACCESS_KEY=your_secret
 export AWS_DEFAULT_REGION=us-east-1
 ```
 
-### Step 3: Create Serverless Configuration
-
-Create **`serverless.yml`** in project root:
-
-```yaml
-service: quote0-api
-
-frameworkVersion: '3'
-
-provider:
-  name: aws
-  runtime: nodejs18.x
-  region: us-east-1
-  stage: ${opt:stage, 'dev'}
-  memorySize: 512
-  timeout: 30
-  
-  environment:
-    NODE_ENV: ${self:provider.stage}
-    DB_HOST: ${env:DB_HOST}
-    DB_PORT: ${env:DB_PORT}
-    DB_NAME: ${env:DB_NAME}
-    DB_USER: ${env:DB_USER}
-    DB_PASSWORD: ${env:DB_PASSWORD}
-    UPRN: ${env:UPRN}
-    QUOTE0_TEXT_API: ${env:QUOTE0_TEXT_API}
-    READING_API_URL: ${env:READING_API_URL, 'https://api.reading.gov.uk/api/collections'}
-  
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
-          Resource: '*'
-
-functions:
-  # API Gateway handlers
-  getDisplay:
-    handler: src/lambda/handlers.getDisplay
-    events:
-      - httpApi:
-          path: /api/display
-          method: GET
-
-  createEvent:
-    handler: src/lambda/handlers.createEvent
-    events:
-      - httpApi:
-          path: /api/events
-          method: PUT
-
-  # Scheduled update
-  scheduledUpdate:
-    handler: src/lambda/handlers.scheduledUpdate
-    events:
-      - schedule:
-          rate: cron(10 1 * * ? *)   # 01:10 UTC
-          enabled: true
-      - schedule:
-          rate: cron(10 7 * * ? *)   # 07:10 UTC
-          enabled: true
-      - schedule:
-          rate: cron(10 12 * * ? *)  # 12:10 UTC
-          enabled: true
-      - schedule:
-          rate: cron(10 17 * * ? *)  # 17:10 UTC
-          enabled: true
-
-plugins:
-  - serverless-offline
-
-custom:
-  serverless-offline:
-    httpPort: 3000
-```
-
-### Step 4: Create Lambda Handlers
-
-Create **`src/lambda/handlers.js`**:
-
-```javascript
-const binCollectionService = require('../services/binCollectionService');
-const databaseService = require('../services/databaseService');
-const displayFormatterService = require('../services/displayFormatterService');
-const quote0ClientService = require('../services/quote0ClientService');
-const scheduledUpdateService = require('../services/scheduledUpdateService');
-
-// GET /api/display
-exports.getDisplay = async (event) => {
-  try {
-    console.log('GET /api/display - Lambda handler');
-
-    const binCollections = await binCollectionService.getTomorrowCollections();
-    const today = new Date().toISOString().split('T')[0];
-    const events = await databaseService.getEventsByDate(today);
-    const displayData = displayFormatterService.formatDisplay(events, binCollections);
-
-    return {
-      statusCode: 200,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(displayData)
-    };
-  } catch (error) {
-    console.error('Error:', error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        error: 'Internal server error',
-        message: error.message
-      })
-    };
-  }
-};
-
-// PUT /api/events
-exports.createEvent = async (event) => {
-  try {
-    console.log('PUT /api/events - Lambda handler');
-
-    const body = JSON.parse(event.body);
-    const { date, event: eventText } = body;
-
-    // Validation
-    if (!date || !eventText) {
-      return {
-        statusCode: 400,
-        body: JSON.stringify({
-          error: 'Bad Request',
-          message: 'Missing required fields: date, event'
-        })
-      };
-    }
-
-    // Normalize date
-    const normalizedDate = date.replace(/\//g, '-');
-    
-    // Create event
-    const createdEvent = await databaseService.createEvent(normalizedDate, eventText);
-
-    return {
-      statusCode: 201,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(createdEvent)
-    };
-  } catch (error) {
-    console.error('Error:', error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        error: 'Internal server error',
-        message: error.message
-      })
-    };
-  }
-};
-
-// Scheduled update
-exports.scheduledUpdate = async (event) => {
-  console.log('Scheduled update - Lambda handler');
-  console.log('Event:', JSON.stringify(event));
-
-  try {
-    const result = await scheduledUpdateService.executeUpdate();
-
-    return {
-      statusCode: 200,
-      body: JSON.stringify(result)
-    };
-  } catch (error) {
-    console.error('Scheduled update failed:', error);
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
-        error: error.message
-      })
-    };
-  }
-};
-```
-
-### Step 5: Install Lambda Dependencies
-
-```bash
-npm install serverless-offline
-```
-
-### Step 6: Deploy to AWS
-
-**Development Deployment**:
-```bash
-serverless deploy --stage dev
-```
-
-**Production Deployment**:
-```bash
-serverless deploy --stage prod
-```
-
-**Expected Output**:
-```
-Deploying quote0-api to stage prod (us-east-1)
-
-✔ Service deployed to stack quote0-api-prod (152s)
-
-endpoints:
-  GET - https://abc123xyz.execute-api.us-east-1.amazonaws.com/api/display
-  PUT - https://abc123xyz.execute-api.us-east-1.amazonaws.com/api/events
-functions:
-  getDisplay: quote0-api-prod-getDisplay (1.5 MB)
-  createEvent: quote0-api-prod-createEvent (1.5 MB)
-  scheduledUpdate: quote0-api-prod-scheduledUpdate (1.5 MB)
-```
-
-### Step 7: Test Lambda Deployment
-
-```bash
-# Test GET endpoint
-curl https://abc123xyz.execute-api.us-east-1.amazonaws.com/api/display
-
-# Test PUT endpoint
-curl -X PUT https://abc123xyz.execute-api.us-east-1.amazonaws.com/api/events \
-  -H "Content-Type: application/json" \
-  -d '{"date":"2026/02/10","event":"Test from Lambda"}'
-```
-
-### Step 8: View Logs
-
-```bash
-# View all logs
-serverless logs --function getDisplay --stage prod
-
-# Tail logs in real-time
-serverless logs --function scheduledUpdate --stage prod --tail
-```
-
-### Step 9: Update Environment Variables
-
-```bash
-# Update environment variable
-serverless deploy function --function scheduledUpdate --stage prod
-
-# Or use AWS Systems Manager Parameter Store
-aws ssm put-parameter \
-  --name "/quote0-api/prod/QUOTE0_TEXT_API" \
-  --value "http://your-device-ip/text-api" \
-  --type SecureString
-```
-
 ---
 
-## Option 2: Traditional Server (Oracle Cloud / Linux)
+## Step 2: Configure Environment Variables
 
-### Prerequisites
-
-- Server with SSH access
-- Node.js 18+ installed
-- PostgreSQL or MySQL installed
-- Domain or static IP
-
-### Step 1: Prepare Server
+Create `.env` file with your configuration:
 
 ```bash
-# SSH to server
-ssh ubuntu@your-server-ip
+# Quote/0 Device
+QUOTE0_TEXT_API=https://dot.mindreset.tech/api/authV2/open/device/YOUR_DEVICE_ID/text
+QUOTE0_AUTH_TOKEN=your_quote0_bearer_token
 
-# Update system
-sudo apt update && sudo apt upgrade -y
+# API Authorization
+API_AUTH_TOKEN=your-secret-api-key
 
-# Install Node.js 18
-curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash -
-sudo apt install -y nodejs
-
-# Install PostgreSQL
-sudo apt install -y postgresql postgresql-contrib
-
-# Install PM2
-sudo npm install -g pm2
-```
-
-### Step 2: Setup Database
-
-```bash
-# Create database
-sudo -u postgres psql
-CREATE DATABASE quote0_db;
-CREATE USER quote0_user WITH ENCRYPTED PASSWORD 'secure_password';
-GRANT ALL PRIVILEGES ON DATABASE quote0_db TO quote0_user;
-\q
-```
-
-### Step 3: Deploy Application
-
-```bash
-# Clone or upload code
-cd /opt
-sudo git clone https://github.com/your-repo/quote0_api.git
-cd quote0_api
-
-# Install dependencies
-npm install --production
-
-# Create .env file
-sudo nano .env
-# Paste your configuration
-```
-
-**`.env` for production**:
-```env
-NODE_ENV=production
-PORT=8080
-HOST=0.0.0.0
-
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=quote0_db
-DB_USER=quote0_user
-DB_PASSWORD=secure_password
-
+# Reading Council
 UPRN=310022781
 READING_API_URL=https://api.reading.gov.uk/api/collections
-QUOTE0_TEXT_API=http://your-quote0-device-ip/text-api
-```
-
-```bash
-# Secure .env
-sudo chmod 600 .env
-
-# Setup database
-npm run db:setup
-```
-
-### Step 4: Start with PM2
-
-```bash
-# Start application
-pm2 start src/index.js --name quote0-api
-
-# Save PM2 configuration
-pm2 save
-
-# Setup PM2 to start on boot
-pm2 startup
-# Run the command that PM2 outputs
-
-# Check status
-pm2 status
-pm2 logs quote0-api
-```
-
-### Step 5: Configure Nginx (Optional)
-
-```bash
-# Install Nginx
-sudo apt install -y nginx
-
-# Create config
-sudo nano /etc/nginx/sites-available/quote0-api
-```
-
-**Nginx configuration**:
-```nginx
-server {
-    listen 80;
-    server_name your-domain.com;  # Or IP address
-
-    location /api {
-        proxy_pass http://localhost:8080/api;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_cache_bypass $http_upgrade;
-    }
-
-    location /health {
-        proxy_pass http://localhost:8080/health;
-    }
-}
-```
-
-```bash
-# Enable site
-sudo ln -s /etc/nginx/sites-available/quote0-api /etc/nginx/sites-enabled/
-sudo nginx -t
-sudo systemctl restart nginx
-```
-
-### Step 6: Configure SSL (Recommended)
-
-```bash
-# Install Certbot
-sudo apt install -y certbot python3-certbot-nginx
-
-# Get certificate
-sudo certbot --nginx -d your-domain.com
-
-# Auto-renewal is configured automatically
-```
-
-### Step 7: Configure Firewall
-
-```bash
-# Allow ports
-sudo ufw allow 22/tcp   # SSH
-sudo ufw allow 80/tcp   # HTTP
-sudo ufw allow 443/tcp  # HTTPS
-
-# Enable firewall
-sudo ufw enable
-sudo ufw status
+READING_API_TIMEOUT=5000
+CACHE_TTL_HOURS=12
 ```
 
 ---
 
-## Option 3: Docker Deployment
+## Step 3: Deploy
 
-### Step 1: Create Dockerfile
-
-Create **`Dockerfile`**:
-
-```dockerfile
-FROM node:18-alpine
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
-RUN npm ci --only=production
-
-# Copy application
-COPY src ./src
-COPY database ./database
-
-# Create logs directory
-RUN mkdir -p logs
-
-# Expose port
-EXPOSE 8080
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:8080/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
-
-# Start application
-CMD ["node", "src/index.js"]
-```
-
-Create **`.dockerignore`**:
-```
-node_modules
-npm-debug.log
-.env
-.git
-tests
-docs
-*.md
-logs
-```
-
-### Step 2: Build Image
+### Development Deployment
 
 ```bash
-docker build -t quote0-api:latest .
+npm run deploy:dev
 ```
 
-### Step 3: Run Container
+### Production Deployment
 
 ```bash
-docker run -d \
-  --name quote0-api \
-  --restart unless-stopped \
-  -p 8080:8080 \
-  -e NODE_ENV=production \
-  -e DB_HOST=host.docker.internal \
-  -e DB_PORT=5432 \
-  -e DB_NAME=quote0_db \
-  -e DB_USER=quote0_user \
-  -e DB_PASSWORD=secure_password \
-  -e UPRN=310022781 \
-  -e QUOTE0_TEXT_API=http://your-device-ip/text-api \
-  quote0-api:latest
-
-# Check logs
-docker logs -f quote0-api
+npm run deploy:prod
 ```
 
-### Step 4: Docker Compose
+### Expected Output
 
-Create **`docker-compose.yml`**:
-
-```yaml
-version: '3.8'
-
-services:
-  api:
-    build: .
-    container_name: quote0-api
-    restart: unless-stopped
-    ports:
-      - "8080:8080"
-    environment:
-      - NODE_ENV=production
-      - DB_HOST=db
-      - DB_PORT=5432
-      - DB_NAME=quote0_db
-      - DB_USER=quote0_user
-      - DB_PASSWORD=secure_password
-      - UPRN=310022781
-      - QUOTE0_TEXT_API=${QUOTE0_TEXT_API}
-    depends_on:
-      - db
-    networks:
-      - quote0-network
-
-  db:
-    image: postgres:15-alpine
-    container_name: quote0-db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=quote0_db
-      - POSTGRES_USER=quote0_user
-      - POSTGRES_PASSWORD=secure_password
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
-    networks:
-      - quote0-network
-
-volumes:
-  postgres-data:
-
-networks:
-  quote0-network:
-    driver: bridge
 ```
+Deploying quote0-api to stage dev (us-east-1)
 
-**Start with Docker Compose**:
-```bash
-docker-compose up -d
-docker-compose logs -f
+Service deployed to stack quote0-api-dev
+
+endpoints:
+  POST - https://abc123xyz.execute-api.us-east-1.amazonaws.com/api/events
+  POST - https://abc123xyz.execute-api.us-east-1.amazonaws.com/api/events/batch
+  POST - https://abc123xyz.execute-api.us-east-1.amazonaws.com/test/scheduled-update
+
+functions:
+  testScheduledUpdate: quote0-api-dev-testScheduledUpdate (1.5 MB)
+  createEvent: quote0-api-dev-createEvent (1.5 MB)
+  createEventsBatch: quote0-api-dev-createEventsBatch (1.5 MB)
+  scheduledUpdate: quote0-api-dev-scheduledUpdate (1.5 MB)
 ```
 
 ---
 
-## Post-Deployment Tasks
+## Step 4: Verify Deployment
 
-### Configure Quote/0 Device
+### Test API Endpoints
 
-Point your Quote/0 device to the deployed API endpoint:
-
-**API Endpoint**: 
-- Lambda: `https://abc123xyz.execute-api.us-east-1.amazonaws.com/api/display`
-- Server: `http://your-server-ip:8080/api/display` or `https://your-domain.com/api/display`
-
-**Update Interval**: Every 60 minutes
-
-### Configure iPhone App
-
-Update your iPhone app with the PUT endpoint:
-
-**API Endpoint**: 
-- Lambda: `https://abc123xyz.execute-api.us-east-1.amazonaws.com/api/events`
-- Server: `http://your-server-ip:8080/api/events` or `https://your-domain.com/api/events`
-
-### Verify Scheduled Updates
-
-**Lambda (EventBridge)**:
 ```bash
-# Check EventBridge rules
-aws events list-rules --name-prefix quote0
+# Test POST /api/events
+curl -X POST https://YOUR-API-URL/api/events \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{"date":"2026/02/10","event":"Test from deployment"}'
 
-# View recent executions
-aws events describe-rule --name quote0-api-prod-scheduledUpdate-schedule-1
+# Test POST /api/events/batch
+curl -X POST https://YOUR-API-URL/api/events/batch \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{
+    "events": [
+      {"date":"2026/02/10","event":"Test 1"},
+      {"date":"2026/02/11","event":"Test 2"}
+    ]
+  }'
+
+# Test authorization (should return 401)
+curl -X POST https://YOUR-API-URL/api/events \
+  -H "Content-Type: application/json" \
+  -d '{"date":"2026/02/10","event":"No auth header"}'
 ```
 
-**Traditional Server (PM2)**:
-```bash
-# Check PM2 logs
-pm2 logs quote0-api
+### Verify DynamoDB Tables
 
-# Monitor in real-time
-pm2 monit
+```bash
+# Check events table
+aws dynamodb scan --table-name quote0-api-dev-events
+
+# Check bin collection table
+aws dynamodb scan --table-name quote0-api-dev-bin-collection
 ```
 
-**Docker**:
-```bash
-# View logs
-docker logs -f quote0-api
+### Verify EventBridge Schedule
 
-# Check scheduler output
-docker logs quote0-api | grep "Scheduled update"
+```bash
+# Check rule exists and is enabled
+aws events list-rules --name-prefix quote0-api-dev
 ```
 
 ---
 
-## Monitoring & Maintenance
-
-### Application Logs
-
-**Lambda (CloudWatch)**:
-```bash
-# View logs
-aws logs tail /aws/lambda/quote0-api-prod-scheduledUpdate --follow
-
-# Query logs
-aws logs filter-log-events \
-  --log-group-name /aws/lambda/quote0-api-prod-scheduledUpdate \
-  --start-time $(date -u -d '1 hour ago' +%s)000
-```
-
-**PM2**:
-```bash
-# View logs
-pm2 logs quote0-api
-
-# Error logs only
-pm2 logs quote0-api --err
-
-# Last 100 lines
-pm2 logs quote0-api --lines 100
-```
-
-### Database Backups
-
-**Automated Backup Script** (`/opt/quote0/backup.sh`):
+## Step 5: View Logs
 
 ```bash
-#!/bin/bash
-DATE=$(date +%Y%m%d_%H%M%S)
-BACKUP_DIR=/opt/quote0/backups
-mkdir -p $BACKUP_DIR
+# Tail scheduled update logs
+npm run logs
 
-# Backup database
-pg_dump -U quote0_user quote0_db | gzip > $BACKUP_DIR/quote0_db_$DATE.sql.gz
+# Tail create event logs
+npm run logs:create
 
-# Keep last 7 days
-find $BACKUP_DIR -name "quote0_db_*.sql.gz" -mtime +7 -delete
+# Tail batch event logs
+npm run logs:batch
 
-echo "Backup completed: quote0_db_$DATE.sql.gz"
+# Or use AWS CLI directly
+aws logs tail /aws/lambda/quote0-api-dev-scheduledUpdate --follow
+aws logs tail /aws/lambda/quote0-api-dev-createEvent --follow
+aws logs tail /aws/lambda/quote0-api-dev-createEventsBatch --follow
 ```
 
-**Schedule Daily Backup** (crontab):
-```bash
-# Run at 02:00 daily
-0 2 * * * /opt/quote0/backup.sh >> /var/log/quote0/backup.log 2>&1
-```
+---
 
-### Update Application
+## AWS Resources Created
 
-**Lambda**:
-```bash
-# Update code
-git pull origin main
+| Resource | Name | Purpose |
+|----------|------|---------|
+| **Lambda Functions** | | |
+| - createEvent | `quote0-api-{stage}-createEvent` | POST /api/events |
+| - createEventsBatch | `quote0-api-{stage}-createEventsBatch` | POST /api/events/batch |
+| - scheduledUpdate | `quote0-api-{stage}-scheduledUpdate` | Daily cron job |
+| - testScheduledUpdate | `quote0-api-{stage}-testScheduledUpdate` | Dev test trigger |
+| **DynamoDB Tables** | | |
+| - Events | `quote0-api-{stage}-events` | Event storage |
+| - Bin Collection | `quote0-api-{stage}-bin-collection` | Bin schedule storage |
+| **EventBridge** | | |
+| - Schedule | `quote0-api-{stage}-schedule-0110` | 01:10 UTC daily |
+| **API Gateway** | | |
+| - HTTP API | Auto-generated | REST API endpoints |
+| **IAM** | | |
+| - Lambda role | Auto-generated | DynamoDB + CloudWatch permissions |
 
-# Deploy
-serverless deploy --stage prod
-```
+---
 
-**PM2**:
-```bash
-# Update code
-cd /opt/quote0/quote0_api
-git pull origin main
+## Updating a Deployment
 
-# Install dependencies (if package.json changed)
-npm install --production
-
-# Restart
-pm2 restart quote0-api
-
-# Verify
-pm2 logs quote0-api --lines 20
-```
-
-**Docker**:
 ```bash
 # Pull latest code
-git pull origin main
+git pull
 
-# Rebuild and restart
-docker-compose down
-docker-compose build
-docker-compose up -d
+# Install any new dependencies
+npm install
 
-# Verify
-docker-compose logs -f
+# Redeploy
+npm run deploy:dev  # or deploy:prod
+```
+
+To update a single function without full redeploy:
+
+```bash
+serverless deploy function --function createEvent --stage dev
+```
+
+---
+
+## Environment Variable Updates
+
+After changing `.env`:
+
+```bash
+# Redeploy to pick up new environment variables
+npm run deploy:dev
+```
+
+Or update a specific Lambda's environment directly:
+
+```bash
+aws lambda update-function-configuration \
+  --function-name quote0-api-dev-createEvent \
+  --environment "Variables={API_AUTH_TOKEN=new-token,QUOTE0_TEXT_API=...}"
+```
+
+---
+
+## Removing a Deployment
+
+```bash
+# Remove development
+npm run remove:dev
+
+# Remove production
+npm run remove:prod
+```
+
+**Warning:** This permanently deletes:
+- All Lambda functions
+- DynamoDB tables (events + bin_collection) and all data
+- API Gateway endpoints
+- EventBridge rules
+- CloudWatch log groups
+
+---
+
+## Monitoring
+
+### CloudWatch Logs
+
+```bash
+# View recent logs
+aws logs tail /aws/lambda/quote0-api-dev-scheduledUpdate --since 1h
+
+# Search for errors
+aws logs filter-log-events \
+  --log-group-name /aws/lambda/quote0-api-dev-scheduledUpdate \
+  --filter-pattern "ERROR"
+```
+
+### Lambda Metrics
+
+```bash
+# View function info
+serverless info --stage dev
+
+# View invocation metrics
+aws cloudwatch get-metric-statistics \
+  --namespace AWS/Lambda \
+  --metric-name Invocations \
+  --dimensions Name=FunctionName,Value=quote0-api-dev-scheduledUpdate \
+  --start-time $(date -u -d '24 hours ago' +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Sum
 ```
 
 ---
 
 ## Troubleshooting
 
-### Lambda Issues
+### Deployment Fails with "Access Denied"
 
-**Cold Start Problems**:
-- Enable provisioned concurrency (costs more)
-- Increase memory allocation (faster cold starts)
-- Use Lambda Insights for diagnostics
-
-**EventBridge Not Triggering**:
 ```bash
-# Check rules
-aws events list-rules
+# Verify AWS credentials
+aws sts get-caller-identity
 
-# Check targets
-aws events list-targets-by-rule --rule quote0-api-prod-scheduledUpdate-schedule-1
-
-# Enable rule if disabled
-aws events enable-rule --name quote0-api-prod-scheduledUpdate-schedule-1
+# Reconfigure if needed
+aws configure
 ```
 
-### Server Issues
+### EventBridge Not Triggering
 
-**Application Won't Start**:
 ```bash
-# Check PM2 status
-pm2 status
+# Check rule status
+aws events describe-rule --name quote0-api-dev-schedule-0110
 
-# View error logs
-pm2 logs quote0-api --err
-
-# Restart
-pm2 restart quote0-api
-
-# Check environment
-pm2 env quote0-api
+# Enable if disabled
+aws events enable-rule --name quote0-api-dev-schedule-0110
 ```
 
-**Database Connection Errors**:
-```bash
-# Test connection
-psql -U quote0_user -h localhost -d quote0_db
+### Lambda Timeout
 
-# Check PostgreSQL status
-sudo systemctl status postgresql
+If functions time out, increase timeout in `serverless.yml`:
 
-# Restart PostgreSQL
-sudo systemctl restart postgresql
+```yaml
+functions:
+  createEvent:
+    timeout: 60  # seconds
+  createEventsBatch:
+    timeout: 90
+  scheduledUpdate:
+    timeout: 60
 ```
 
-**Port Already in Use**:
-```bash
-# Find process using port 8080
-sudo netstat -tlnp | grep 8080
+### DynamoDB Errors
 
-# Kill process
-sudo kill -9 <PID>
+```bash
+# Check table exists
+aws dynamodb describe-table --table-name quote0-api-dev-events
+aws dynamodb describe-table --table-name quote0-api-dev-bin-collection
+
+# Check IAM permissions
+aws iam get-role-policy --role-name quote0-api-dev-us-east-1-lambdaRole --policy-name quote0-api-dev-lambda
 ```
 
-### Docker Issues
+### 401/403 on API Calls
 
-**Container Won't Start**:
-```bash
-# Check logs
-docker logs quote0-api
-
-# Inspect container
-docker inspect quote0-api
-
-# Restart
-docker restart quote0-api
-```
+- **401**: Missing `Authorization` header. Add `Authorization: Bearer YOUR_TOKEN`.
+- **403**: Wrong token. Verify `API_AUTH_TOKEN` in your `.env` matches the token in your request.
+- After changing `.env`, redeploy: `npm run deploy:dev`
 
 ---
 
 ## Security Checklist
 
-- [ ] Environment variables stored securely (not in code)
-- [ ] Database uses strong password
-- [ ] Firewall configured (only necessary ports open)
-- [ ] SSH password authentication disabled
-- [ ] HTTPS/SSL configured (for domain-based deployments)
-- [ ] Regular security updates applied
-- [ ] Database backups configured
-- [ ] Logs monitored for suspicious activity
+- [ ] `API_AUTH_TOKEN` is set to a strong random secret
+- [ ] `QUOTE0_AUTH_TOKEN` is set correctly
+- [ ] `.env` file is not committed to git (check `.gitignore`)
+- [ ] IAM roles have minimal required permissions
+- [ ] API Gateway uses HTTPS only
+- [ ] CloudWatch logs are being generated
 
 ---
 
-## Cost Estimation
-
-### AWS Lambda (Low Traffic)
+## Cost Estimate
 
 | Component | Monthly Cost |
 |-----------|-------------|
-| Lambda executions (~1000/month) | ~$0.20 |
-| API Gateway requests (~1000/month) | ~$0.01 |
+| Lambda executions (~1,000/month) | ~$0.37 |
+| DynamoDB (~1,050 requests) | ~$0.30 |
+| API Gateway (~1,000 requests) | ~$0.01 |
+| EventBridge (30 invocations) | Free |
 | CloudWatch Logs | ~$0.50 |
-| EventBridge rules (4 daily) | Free |
-| **Total** | **~$0.71/month** |
+| **Total** | **~$1.18/month** |
 
-### Traditional Server (Oracle Cloud)
-
-| Component | Monthly Cost |
-|-----------|-------------|
-| VM.Standard.E2.1.Micro (Always Free) | $0 |
-| PostgreSQL (on same VM) | $0 |
-| Data transfer | $0 (within free tier) |
-| **Total** | **$0/month** |
-
-*Note: Oracle Cloud offers generous Always Free tier*
+Most of this is covered by AWS Free Tier for the first 12 months.
 
 ---
 
-## Conclusion
+## Production Checklist
 
-Your Quote0 API is now deployed and running! 🎉
+Before deploying to production:
 
-**Next Steps**:
-1. Configure Quote/0 device with API endpoint
-2. Test scheduled updates (check logs at 01:10, 07:10, 12:10, 17:10)
-3. Setup iPhone app to create events
-4. Monitor logs for first few days
-5. Configure backups and monitoring
+- [ ] Set strong `API_AUTH_TOKEN`
+- [ ] Configure production `QUOTE0_TEXT_API` and `QUOTE0_AUTH_TOKEN`
+- [ ] Test all endpoints with production credentials
+- [ ] Verify EventBridge schedule is enabled
+- [ ] Set up CloudWatch alarms for Lambda errors (optional)
+- [ ] Configure API Gateway throttling (optional)
+- [ ] Remove `testScheduledUpdate` function from `serverless.yml` (optional)
 
-For questions or issues, refer to the troubleshooting section or check application logs.
+---
+
+For implementation details, see [04-implementation.md](./04-implementation.md).
+For API documentation, see [02-api-reference.md](./02-api-reference.md).

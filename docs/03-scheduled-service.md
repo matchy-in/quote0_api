@@ -519,7 +519,7 @@ serverless logs -f scheduledUpdate --tail
 npm start
 
 # In another terminal, trigger the scheduled function
-curl -X POST http://localhost:3000/test/scheduledUpdate
+curl -X POST http://localhost:3000/test/scheduled-update
 ```
 
 ---

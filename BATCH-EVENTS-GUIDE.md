@@ -19,6 +19,18 @@ The **batch events endpoint** (`POST /api/events/batch`) allows you to create mu
 
 ---
 
+## Authorization
+
+All requests to the batch endpoint require a Bearer token in the `Authorization` header:
+
+```
+Authorization: Bearer YOUR_API_AUTH_TOKEN
+```
+
+If the token is missing, the API returns **401 Unauthorized**. If the token is invalid, it returns **403 Forbidden**.
+
+---
+
 ## Quick Example
 
 ### Request
@@ -26,6 +38,7 @@ The **batch events endpoint** (`POST /api/events/batch`) allows you to create mu
 ```bash
 curl -X POST https://your-api.com/api/events/batch \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{
     "events": [
       {
@@ -106,6 +119,8 @@ Each event is validated for:
 | **201** | Created | All events created successfully |
 | **207** | Multi-Status | Some events succeeded, some failed |
 | **400** | Bad Request | Invalid request format or empty array |
+| **401** | Unauthorized | Missing Authorization header |
+| **403** | Forbidden | Invalid API token |
 | **422** | Unprocessable | Validation errors (all events failed validation) |
 | **500** | Server Error | Internal error occurred |
 
@@ -127,7 +142,10 @@ async function createWeekEvents() {
 
   const response = await fetch('https://your-api.com/api/events/batch', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer YOUR_API_AUTH_TOKEN'
+    },
     body: JSON.stringify({ events })
   });
 
@@ -168,6 +186,7 @@ func createWeekEvents() {
     var request = URLRequest(url: url)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer YOUR_API_AUTH_TOKEN", forHTTPHeaderField: "Authorization")
     
     let batchRequest = BatchEventRequest(events: events)
     request.httpBody = try? JSONEncoder().encode(batchRequest)
@@ -205,10 +224,15 @@ $events = @{
 
 $body = $events | ConvertTo-Json -Depth 3
 
+$headers = @{
+    "Authorization" = "Bearer YOUR_API_AUTH_TOKEN"
+}
+
 $response = Invoke-RestMethod `
     -Uri "https://your-api.com/api/events/batch" `
     -Method POST `
     -ContentType "application/json" `
+    -Headers $headers `
     -Body $body
 
 Write-Host "✅ Created $($response.succeeded)/$($response.total) events"
@@ -238,9 +262,14 @@ def create_week_events():
         ]
     }
     
+    headers = {
+        "Authorization": "Bearer YOUR_API_AUTH_TOKEN"
+    }
+    
     response = requests.post(
         "https://your-api.com/api/events/batch",
-        json=events
+        json=events,
+        headers=headers
     )
     
     result = response.json()
@@ -423,6 +452,7 @@ npm run offline
 # In another terminal
 curl -X POST http://localhost:3000/api/events/batch \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{
     "events": [
       {"date": "2026/02/10", "event": "Test event 1"},
@@ -441,6 +471,7 @@ npm run deploy:dev
 # Then test
 curl -X POST https://your-api-id.execute-api.us-east-1.amazonaws.com/api/events/batch \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{
     "events": [
       {"date": "2026/02/10", "event": "Test event 1"},
@@ -502,6 +533,10 @@ for (const evt of events) {
 ```javascript
 const response = await fetch('/api/events/batch', {
   method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer YOUR_API_AUTH_TOKEN'
+  },
   body: JSON.stringify({ events })
 });
 ```

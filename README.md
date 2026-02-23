@@ -1,6 +1,6 @@
 # Quote0 API - Serverless Microservice
 
-A serverless microservice that displays upcoming events on Quote/0 reminder device, with automatic bin collection schedule integration using AWS Lambda and DynamoDB.
+A serverless microservice that pushes upcoming events to a Quote/0 reminder device, with automatic bin collection schedule integration using AWS Lambda and DynamoDB.
 
 <img src="https://img.shields.io/badge/AWS-Lambda-orange" alt="AWS Lambda"/>
 <img src="https://img.shields.io/badge/Database-DynamoDB-blue" alt="DynamoDB"/>
@@ -9,7 +9,7 @@ A serverless microservice that displays upcoming events on Quote/0 reminder devi
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ```bash
 # Install dependencies
@@ -22,84 +22,91 @@ npm run deploy:dev
 npm run logs
 ```
 
-**⚡ Ready in 10 minutes!** See [QUICKSTART.md](./QUICKSTART.md) for detailed setup.
+**Ready in 10 minutes!** See [QUICKSTART.md](./QUICKSTART.md) for detailed setup.
 
 ---
 
-## ✨ Features
+## Features
 
-- **🕐 Scheduled Updates** - Automatic pushes at 01:10, 07:10, 12:10, 17:10 daily
-- **🗑️ Bin Collection Integration** - Reading Council API with smart caching
-- **📅 Event Management** - DynamoDB-backed custom events
-- **📟 Quote/0 Display** - Format-compliant (25/29 char constraints)
-- **⚡ Serverless** - AWS Lambda + DynamoDB (pay-per-use)
-- **🔄 Auto-Scaling** - Handles traffic spikes automatically
-- **💰 Cost-Effective** - ~$1.18/month for typical usage
+- **Scheduled Updates** - Automatic push at 01:10 UTC daily
+- **Bin Collection Integration** - Reading Council API with DynamoDB storage
+- **Event Management** - Create single or batch events via POST endpoints
+- **Quote/0 Display** - Push-only architecture via official Quote/0 Text API
+- **API Authorization** - Bearer token authentication on all HTTP endpoints
+- **Serverless** - AWS Lambda + DynamoDB (pay-per-use)
+- **Auto-Scaling** - Handles traffic spikes automatically
+- **Cost-Effective** - ~$1.18/month for typical usage
 
 ---
 
-## 🏗️ Architecture
+## Architecture
+
+> **Push-only system**: Lambda functions actively push updates to Quote/0 via the official Text API. The Quote/0 device does NOT call this API.
 
 ```
-EventBridge (Cron)          Quote/0 Device       iPhone App
-01:10, 07:10               (Hourly Pull)        (Create Events)
-12:10, 17:10                     │                    │
-     │                           │                    │
-     └─────────────┬─────────────┴────────────────────┘
-                   │
-                   ▼
-       ┌───────────────────────────┐
-       │   API Gateway (HTTP API)  │
-       └───────────────────────────┘
-                   │
-                   ▼
-       ┌───────────────────────────┐
-       │   AWS Lambda Functions    │
-       │   • GET /api/display      │
-       │   • PUT /api/events       │
-       │   • scheduledUpdate       │
-       └───────────────────────────┘
-                   │
-        ┌──────────┴──────────┐
-        │                     │
-        ▼                     ▼
-   DynamoDB              Reading Council
-    Events               Bin Collection API
+iPhone App / PC                        EventBridge (01:10 UTC)
+(Create Events)                               |
+     |                                        |
+     v                                        v
+┌──────────────────────────────────────────────────────┐
+│   API Gateway (HTTP API)                             │
+│   Authorization: Bearer <API_AUTH_TOKEN>              │
+├──────────────────────────────────────────────────────┤
+│   AWS Lambda Functions                               │
+│   - POST /api/events        (single event)           │
+│   - POST /api/events/batch  (batch events)           │
+│   - scheduledUpdate         (daily cron)             │
+│   - POST /test/scheduled-update (dev only)           │
+└──────────────────────────────────────────────────────┘
+           |                    |                |
+           v                    v                v
+      DynamoDB             Reading Council    Quote/0
+   (events +               Bin Collection     Device
+    bin_collection)         API
 ```
 
 ---
 
-## 📡 API Endpoints
+## API Endpoints
 
-### GET /api/display
-Returns formatted display data for Quote/0 device.
+All HTTP endpoints require an `Authorization: Bearer <API_AUTH_TOKEN>` header.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/events` | Create single event and update Quote/0 |
+| POST | `/api/events/batch` | Create multiple events (up to 100) and update Quote/0 |
+| POST | `/test/scheduled-update` | Manually trigger scheduled update (dev only) |
+
+**Note**: No GET endpoint. This is a push-only architecture.
+
+### Create a Single Event
 
 ```bash
-curl https://YOUR-API-URL.execute-api.us-east-1.amazonaws.com/api/display
-```
-
-**Response:**
-```json
-{
-  "refreshNow": false,
-  "title": "2026/02/10",
-  "signature": "collect Red bin tmr",
-  "message": "Dentist 3pm\nSchool play 6pm\nLibrary books due"
-}
-```
-
-### PUT /api/events
-Creates a new event in DynamoDB.
-
-```bash
-curl -X PUT https://YOUR-API-URL.execute-api.us-east-1.amazonaws.com/api/events \
+curl -X POST https://YOUR-API-URL/api/events \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
   -d '{"date":"2026/02/10","event":"Meeting at 10am"}'
 ```
 
+### Create Events in Batch
+
+```bash
+curl -X POST https://YOUR-API-URL/api/events/batch \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{
+    "events": [
+      {"date": "2026/02/10", "event": "Maths homework p.63"},
+      {"date": "2026/02/11", "event": "Doctor 2pm"}
+    ]
+  }'
+```
+
+See [BATCH-EVENTS-GUIDE.md](./BATCH-EVENTS-GUIDE.md) for full batch documentation.
+
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Component | Technology | Why |
 |-----------|-----------|-----|
@@ -108,26 +115,27 @@ curl -X PUT https://YOUR-API-URL.execute-api.us-east-1.amazonaws.com/api/events 
 | **Scheduling** | AWS EventBridge | Native cron support, reliable |
 | **API** | API Gateway HTTP API | Low latency, cost-effective |
 | **External API** | Reading Council Bin API | Public bin collection data |
-| **Caching** | In-memory (Lambda) | 12-hour TTL for bin data |
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 quote0_api/
-├── serverless.yml              # AWS infrastructure definition
-├── package.json                # Node.js dependencies
-├── QUICKSTART.md              # 10-minute setup guide
+├── serverless.yml                # AWS infrastructure definition
+├── package.json                  # Node.js dependencies
+├── QUICKSTART.md                 # 10-minute setup guide
+├── BATCH-EVENTS-GUIDE.md         # Batch endpoint documentation
 ├── src/
 │   ├── lambda/
-│   │   └── handlers.js         # Lambda function handlers
+│   │   └── handlers.js           # Lambda function handlers (with auth)
 │   └── services/
-│       ├── dynamoDbService.js  # DynamoDB operations
-│       ├── binCollectionService.js
-│       ├── displayFormatterService.js
-│       ├── quote0ClientService.js
-│       └── scheduledUpdateService.js
+│       ├── dynamoDbService.js        # DynamoDB operations (events)
+│       ├── binCollectionDbService.js  # DynamoDB operations (bin collections)
+│       ├── binCollectionService.js    # Reading Council API integration
+│       ├── displayFormatterService.js # Quote/0 display formatting
+│       ├── quote0ClientService.js     # Quote/0 device communication
+│       └── scheduledUpdateService.js  # Scheduled update orchestration
 └── docs/
     ├── README.md               # Documentation index
     ├── 01-architecture.md      # System architecture
@@ -139,9 +147,10 @@ quote0_api/
 
 ---
 
-## 📚 Documentation
+## Documentation
 
 - **[Quick Start Guide](./QUICKSTART.md)** - Get running in 10 minutes
+- **[Batch Events Guide](./BATCH-EVENTS-GUIDE.md)** - Batch event creation
 - **[Architecture](./docs/01-architecture.md)** - System design and components
 - **[API Reference](./docs/02-api-reference.md)** - Complete API documentation
 - **[Scheduled Service](./docs/03-scheduled-service.md)** - EventBridge configuration
@@ -150,7 +159,7 @@ quote0_api/
 
 ---
 
-## 🔧 Development
+## Development
 
 ### Local Testing
 
@@ -161,8 +170,11 @@ npm install
 # Run offline (requires serverless-offline)
 npm start
 
-# Test endpoints locally
-curl http://localhost:3000/api/display
+# Test endpoints locally (include auth header if API_AUTH_TOKEN is set)
+curl -X POST http://localhost:3000/api/events \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{"date":"2026/02/10","event":"Test event"}'
 ```
 
 ### Deploy
@@ -190,7 +202,7 @@ aws dynamodb scan --table-name quote0-api-dev-events
 
 ---
 
-## 💰 Cost
+## Cost
 
 **Typical monthly cost:**
 
@@ -202,126 +214,69 @@ aws dynamodb scan --table-name quote0-api-dev-events
 | CloudWatch | ~5GB logs | $0.50 |
 | **Total** | | **~$1.18/month** |
 
-💡 **AWS Free Tier** covers most of this for first 12 months!
+AWS Free Tier covers most of this for the first 12 months.
 
 ---
 
-## 🗓️ Scheduled Updates
+## Scheduled Updates
 
 The service automatically pushes updates to Quote/0 at:
 
 | Time (UTC) | Purpose |
 |------------|---------|
-| 01:10 | Early morning refresh |
-| 07:10 | Morning update before workday |
-| 12:10 | Midday refresh |
-| 17:10 | Evening update after work |
+| 01:10 | Daily bin collection sync and display update |
 
-**Note:** Times are in UTC. Adjust in `serverless.yml` for your timezone.
+Additionally, creating events via `POST /api/events` or `POST /api/events/batch` triggers an immediate Quote/0 update.
 
----
-
-## 🔒 Security
-
-- ✅ IAM roles with minimal permissions
-- ✅ DynamoDB encryption at rest
-- ✅ API Gateway with HTTPS only
-- ✅ Environment variables for secrets
-- ✅ No hardcoded credentials
-- ✅ CloudWatch logs for audit trail
+**Note:** Time is in UTC. Adjust in `serverless.yml` for your timezone.
 
 ---
 
-## 🧪 Testing
+## Security
 
-```bash
-# Test GET endpoint
-curl https://YOUR-API-URL/api/display
-
-# Test PUT endpoint
-curl -X PUT https://YOUR-API-URL/api/events \
-  -H "Content-Type: application/json" \
-  -d '{"date":"2026/02/10","event":"Test event"}'
-
-# Manually trigger scheduled update
-serverless invoke --function scheduledUpdate --stage dev
-```
+- IAM roles with minimal permissions
+- DynamoDB encryption at rest
+- API Gateway with HTTPS only
+- **Bearer token authorization** on all HTTP endpoints (`API_AUTH_TOKEN`)
+- Bearer token authentication for outbound Quote/0 API calls (`QUOTE0_AUTH_TOKEN`)
+- Environment variables for secrets
+- No hardcoded credentials
+- CloudWatch logs for audit trail
 
 ---
 
-## 🐛 Troubleshooting
-
-**Deployment fails?**
-```bash
-# Check AWS credentials
-aws sts get-caller-identity
-
-# View CloudFormation events
-aws cloudformation describe-stack-events --stack-name quote0-api-dev
-```
-
-**Scheduled updates not running?**
-```bash
-# Check EventBridge rules
-aws events list-rules --name-prefix quote0-api
-
-# View Lambda logs
-aws logs tail /aws/lambda/quote0-api-dev-scheduledUpdate --follow
-```
-
-See [QUICKSTART.md#troubleshooting](./QUICKSTART.md#troubleshooting) for more.
-
----
-
-## 📝 Environment Variables
-
-Required environment variables (set in `.env` or AWS):
+## Environment Variables
 
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `UPRN` | Your property reference number | `310022781` |
-| `QUOTE0_TEXT_API` | Quote/0 device API endpoint | `http://192.168.1.100/api` |
+| `QUOTE0_TEXT_API` | Quote/0 device API endpoint | `https://dot.mindreset.tech/api/...` |
+| `QUOTE0_AUTH_TOKEN` | Bearer token for Quote/0 device API | `dot_app_...` |
+| `API_AUTH_TOKEN` | Bearer token to protect your API endpoints | `your-secret-key` |
 | `READING_API_URL` | Reading Council API URL | `https://api.reading.gov.uk/api/collections` |
-| `CACHE_TTL_HOURS` | Bin data cache duration | `12` |
+| `READING_API_TIMEOUT` | API timeout in ms | `5000` |
+| `CACHE_TTL_HOURS` | Cache duration | `12` |
 
 ---
 
-## 🤝 Contributing
+## DynamoDB Tables
 
-Contributions welcome! Please:
+| Table | Purpose | Primary Key |
+|-------|---------|-------------|
+| `events` | User-created events | `date` (HASH) + `id` (RANGE) |
+| `bin_collection` | Bin collection schedules | `date` (HASH) + `service` (RANGE) |
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
-
----
-
-## 📄 License
-
-MIT License - see LICENSE file for details
+Both tables use TTL for auto-deletion after 90 days.
 
 ---
 
-## 🙋 Support
-
-- **Documentation**: See `docs/` folder
-- **Issues**: Check CloudWatch Logs
-- **Questions**: Open an issue on GitHub
-
----
-
-## 🎯 Roadmap
+## Roadmap
 
 - [ ] Support multiple Quote/0 devices
 - [ ] Web dashboard for event management
 - [ ] More external API integrations (weather, calendar)
 - [ ] Email/SMS notifications
-- [ ] Multi-user support with authentication
 
 ---
 
-**Built with ❤️ for Quote/0 users**
-
-Enjoy your automated household reminder system! 🏠✨
+**Built for Quote/0 users**

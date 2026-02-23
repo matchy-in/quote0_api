@@ -20,6 +20,7 @@ provider:
     READING_API_URL: ${env:READING_API_URL, 'https://api.reading.gov.uk/api/collections'}
     READING_API_TIMEOUT: ${env:READING_API_TIMEOUT, '5000'}
     CACHE_TTL_HOURS: ${env:CACHE_TTL_HOURS, '12'}
+    API_AUTH_TOKEN: ${env:API_AUTH_TOKEN, ''}
   
   iam:
     role:
