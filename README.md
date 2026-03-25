@@ -43,26 +43,54 @@ npm run logs
 
 > **Push-only system**: Lambda functions actively push updates to Quote/0 via the official Text API. The Quote/0 device does NOT call this API.
 
-```
-iPhone App / PC                        EventBridge (01:10 UTC)
-(Create Events)                               |
-     |                                        |
-     v                                        v
-┌──────────────────────────────────────────────────────┐
-│   API Gateway (HTTP API)                             │
-│   Authorization: Bearer <API_AUTH_TOKEN>              │
-├──────────────────────────────────────────────────────┤
-│   AWS Lambda Functions                               │
-│   - POST /api/events        (single event)           │
-│   - POST /api/events/batch  (batch events)           │
-│   - scheduledUpdate         (daily cron)             │
-│   - POST /test/scheduled-update (dev only)           │
-└──────────────────────────────────────────────────────┘
-           |                    |                |
-           v                    v                v
-      DynamoDB             Reading Council    Quote/0
-   (events +               Bin Collection     Device
-    bin_collection)         API
+```mermaid
+---
+config:
+  layout: dagre
+---
+flowchart TB
+ subgraph Clients["Clients"]
+        phone["iPhone App / PC"]
+        cron["EventBridge\n01:10 UTC daily"]
+  end
+ subgraph Lambda["Lambda Functions"]
+        create["POST /api/events(single event)"]
+        batch["POST /api/events/batch(batch events)"]
+        sched["scheduledUpdate(daily cron)"]
+  end
+ subgraph DynamoDB["DynamoDB"]
+        events[("events table")]
+        bins[("bin_collection table")]
+  end
+ subgraph AWS["AWS Cloud"]
+        gw["API Gateway HTTP API"]
+        Lambda
+        auth{{"Authorization Bearer Token"}}
+        DynamoDB
+  end
+ subgraph External["External APIs - Quote/0"]
+        quote0["Quote/0 Device Text API"]
+  end
+ subgraph External2["External APIs - Reading Council"]
+        n1["Reading Council Bin Collection API"]
+  end
+    phone -- POST + Auth header --> gw
+    cron -- Trigger --> sched
+    gw --> auth
+    auth -- Valid token --> create & batch
+    create -- Upsert event --> events
+    batch -- Upsert events --> events
+    sched -- Store bins --> bins
+    create -- Query --> bins & events
+    batch -- Query --> bins & events
+    sched -- Query --> bins & events
+    create -- Push display --> quote0
+    batch -- Push display --> quote0
+    sched -- Push display --> quote0
+    sched -- Fetch bins --> n1
+
+    n1@{ shape: rect}
+    quote0@{ shape: rect}
 ```
 
 ---

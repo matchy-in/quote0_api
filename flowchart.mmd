@@ -1,0 +1,47 @@
+flowchart TB
+    subgraph Clients
+        phone["iPhone App / PC"]
+        cron["EventBridge\n01:10 UTC daily"]
+    end
+
+    subgraph AWS["AWS Cloud"]
+        gw["API Gateway\nHTTP API"]
+        subgraph Lambda["Lambda Functions"]
+            create["POST /api/events\nsingle event"]
+            batch["POST /api/events/batch\nbatch events"]
+            sched["scheduledUpdate\ndaily cron"]
+        end
+        auth{{"Authorization\nBearer Token"}}
+        subgraph DynamoDB
+            events[("events\ntable")]
+            bins[("bin_collection\ntable")]
+        end
+    end
+
+    subgraph External["External APIs"]
+        reading["Reading Council\nBin Collection API"]
+        quote0["Quote/0 Device\nText API"]
+    end
+
+    phone -->|"POST + Auth header"| gw
+    cron -->|"Trigger"| sched
+    gw --> auth
+    auth -->|"Valid token"| create
+    auth -->|"Valid token"| batch
+
+    create -->|"Upsert event"| events
+    batch -->|"Upsert events"| events
+
+    sched -->|"Fetch bins"| reading
+    sched -->|"Store bins"| bins
+
+    create -->|"Query"| bins
+    create -->|"Query"| events
+    batch -->|"Query"| bins
+    batch -->|"Query"| events
+    sched -->|"Query"| bins
+    sched -->|"Query"| events
+
+    create -->|"Push display"| quote0
+    batch -->|"Push display"| quote0
+    sched -->|"Push display"| quote0
