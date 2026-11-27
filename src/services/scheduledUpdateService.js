@@ -4,16 +4,12 @@
  * 1. Fetch bin collections from Reading API
  * 2. Store in DynamoDB
  * 3. Query tomorrow's collections from database
- * 4. Query today's events from database
- * 5. Format display data
- * 6. Push to Quote/0 device
+ * 4. Build dashboard (weather, 3 upcoming events, bin reminder) and push to Quote/0 via Canvas API
  */
 
 const binCollectionService = require('./binCollectionService');
 const binCollectionDbService = require('./binCollectionDbService');
-const dynamoDbService = require('./dynamoDbService');
-const displayFormatterService = require('./displayFormatterService');
-const quote0ClientService = require('./quote0ClientService');
+const dashboardService = require('./dashboardService');
 
 class ScheduledUpdateService {
   /**
@@ -32,67 +28,50 @@ class ScheduledUpdateService {
     try {
       // Step 1: Fetch bin collections from Reading API
       console.log('');
-      console.log('Step 1/6: Fetching bin collections from Reading API...');
+      console.log('Step 1/4: Fetching bin collections from Reading API...');
       const apiCollections = await binCollectionService.fetchBinCollections();
       console.log(`✅ Step 1 complete: Fetched ${apiCollections.length} collections from API`);
 
       // Step 2: Store bin collections in DynamoDB
       console.log('');
-      console.log('Step 2/6: Storing bin collections in DynamoDB...');
+      console.log('Step 2/4: Storing bin collections in DynamoDB...');
       const storedCount = await binCollectionDbService.storeBinCollections(apiCollections);
       console.log(`✅ Step 2 complete: Stored ${storedCount} bin collections in database`);
 
       // Step 3: Query tomorrow's bin collections from database
       console.log('');
-      console.log('Step 3/6: Querying tomorrow\'s bin collections from database...');
+      console.log('Step 3/4: Querying tomorrow\'s bin collections from database...');
       const tomorrowCollections = await binCollectionDbService.getTomorrowCollections();
       console.log(`✅ Step 3 complete: Found ${tomorrowCollections.length} bin collections for tomorrow`);
 
-      // Step 4: Query today's events from database
+      // Step 4: Build dashboard (weather, 3 upcoming events, bin reminder) and push to Quote/0 via Canvas API
       console.log('');
-      console.log('Step 4/6: Querying today\'s events from database...');
-      const today = new Date().toISOString().split('T')[0];
-      const events = await dynamoDbService.getEventsByDate(today);
-      console.log(`✅ Step 4 complete: Found ${events.length} events for today (${today})`);
-
-      // Step 5: Format display data
-      console.log('');
-      console.log('Step 5/6: Formatting display data...');
-      const displayData = displayFormatterService.formatDisplayFromDb(events, tomorrowCollections);
-      console.log('✅ Step 5 complete: Display data formatted');
-      console.log('');
-      console.log('Display Data Preview:');
-      console.log('─'.repeat(40));
-      console.log(`Title:     "${displayData.title}"`);
-      console.log(`Message:   "${displayData.message.replace(/\n/g, '\\n')}"`);
-      console.log('─'.repeat(40));
-
-      // Step 6: Push to Quote/0 device
-      console.log('');
-      console.log('Step 6/6: Pushing update to Quote/0 device...');
-      await quote0ClientService.updateDisplay(displayData);
-      console.log('✅ Step 6 complete: Update sent to Quote/0');
+      console.log('Step 4/4: Building dashboard and pushing to Quote/0 (Canvas API)...');
+      const { data: dashboard, results: pushResults } = await dashboardService.refresh(tomorrowCollections);
+      const pushed = Object.values(pushResults).every(r => r.success);
+      console.log(`${pushed ? '✅' : '⚠️'} Step 4 complete: dashboard ${pushed ? 'sent' : 'NOT sent'}`, JSON.stringify(pushResults));
 
       const duration = Date.now() - startTime;
       
       console.log('');
       console.log('═'.repeat(80));
-      console.log(`✅ SCHEDULED UPDATE COMPLETED SUCCESSFULLY`);
+      console.log(pushed ? `✅ SCHEDULED UPDATE COMPLETED SUCCESSFULLY` : `⚠️ SCHEDULED UPDATE COMPLETED, BUT QUOTE/0 WAS NOT UPDATED`);
       console.log(`   Duration: ${duration}ms`);
       console.log(`   Time: ${new Date().toISOString()}`);
       console.log('═'.repeat(80));
       console.log('');
 
       return {
-        success: true,
+        success: pushed,
         duration,
         timestamp: new Date().toISOString(),
         metrics: {
           binCollectionsFetched: apiCollections.length,
           binCollectionsStored: storedCount,
           tomorrowCollections: tomorrowCollections.length,
-          eventsFound: events.length,
-          displayData: displayData
+          upcomingEvents: dashboard.events.length,
+          dashboard,
+          pushResults
         }
       };
 

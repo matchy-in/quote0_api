@@ -1,6 +1,6 @@
 {
   "name": "quote0-api",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Serverless microservice for Quote/0 reminder device with DynamoDB",
   "main": "src/lambda/handlers.js",
   "scripts": {

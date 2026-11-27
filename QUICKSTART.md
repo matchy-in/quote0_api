@@ -1,4 +1,4 @@
-# Quote0 API - Quick Start Guide
+﻿# Quote0 API - Quick Start Guide
 
 Get your serverless Quote0 API running in **under 10 minutes**!
 
@@ -37,6 +37,9 @@ QUOTE0_TEXT_API=https://dot.mindreset.tech/api/authV2/open/device/YOUR_DEVICE_ID
 
 # Required: Quote/0 device bearer token
 QUOTE0_AUTH_TOKEN=your_quote0_bearer_token
+# Quote/0 Canvas API (weekly schedule, 2 devices; uses QUOTE0_AUTH_TOKEN)
+QUOTE0_CANVAS_1_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/canvas
+QUOTE0_CANVAS_2_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/canvas
 
 # Required: API authorization token (protects your endpoints)
 API_AUTH_TOKEN=your-secret-api-key
@@ -229,7 +232,7 @@ npm run remove:prod
 
 **Warning:** This will delete:
 - All Lambda functions
-- DynamoDB tables (events and bin_collection) and all data
+- DynamoDB tables (events, bin_collection and schedule) and all data
 - API Gateway endpoints
 - EventBridge rules
 - CloudWatch logs
@@ -343,6 +346,7 @@ aws events describe-rule --name quote0-api-dev-schedule-0110
 - **Documentation**: See `docs/` folder
 - **Issues**: Check Lambda logs in CloudWatch
 - **API Reference**: `docs/02-api-reference.md`
+- **Weekly Schedule & Canvas API**: `docs/06-weekly-schedule.md`
 - **Architecture**: `docs/01-architecture.md`
 - **Batch Events**: `BATCH-EVENTS-GUIDE.md`
 

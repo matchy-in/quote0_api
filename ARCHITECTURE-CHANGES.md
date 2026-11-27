@@ -226,3 +226,13 @@ The iPhone app triggers immediate updates when events are created, making freque
 **Architecture revised on**: 2026-02-05
 **Authorization added on**: 2026-02-23
 **Reason**: Quote/0 device limitation (push-only) + API security
+
+---
+
+## Later Addition: Weekly Schedule & Canvas API
+
+- New `schedule` DynamoDB table (PK `day`, no TTL)
+- New endpoints: `POST /api/schedule`, `GET /api/schedule`, `POST /api/schedule/publish`
+- New services: `scheduleDbService.js`, `quote0CanvasService.js`
+- New env vars: `QUOTE0_CANVAS_1_API`, `QUOTE0_CANVAS_2_API` (Bearer auth reuses `QUOTE0_AUTH_TOKEN`)
+- See [docs/06-weekly-schedule.md](./docs/06-weekly-schedule.md)

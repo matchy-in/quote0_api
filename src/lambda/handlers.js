@@ -6,10 +6,8 @@
  * - Scheduled updates - EventBridge triggers at 01:10 UTC daily
  */
 
-const binCollectionDbService = require('../services/binCollectionDbService');
 const dynamoDbService = require('../services/dynamoDbService');
-const displayFormatterService = require('../services/displayFormatterService');
-const quote0ClientService = require('../services/quote0ClientService');
+const dashboardService = require('../services/dashboardService');
 const scheduledUpdateService = require('../services/scheduledUpdateService');
 
 const API_AUTH_TOKEN = process.env.API_AUTH_TOKEN;
@@ -148,21 +146,9 @@ exports.createEvent = async (event) => {
     console.log('Triggering Quote/0 update after event creation...');
     
     try {
-      // Step 3: Query tomorrow's bin collections from database
-      const binCollections = await binCollectionDbService.getTomorrowCollections();
-      console.log(`Found ${binCollections.length} bin collections for tomorrow`);
-
-      // Step 4: Query today's events
-      const today = new Date().toISOString().split('T')[0];
-      const events = await dynamoDbService.getEventsByDate(today);
-      console.log(`Found ${events.length} events for today`);
-
-      // Step 5: Format display data
-      const displayData = displayFormatterService.formatDisplayFromDb(events, binCollections);
-      console.log('Display data formatted');
-
-      // Step 6: Push to Quote/0
-      await quote0ClientService.updateDisplay(displayData);
+      // Rebuild the dashboard (weather, 3 upcoming events, bin reminder) and push via Canvas API
+      const { results } = await dashboardService.refresh();
+      if (!Object.values(results).every(r => r.success)) throw new Error(JSON.stringify(results));
       console.log('Quote/0 updated successfully');
     } catch (updateError) {
       console.error('Error updating Quote/0:', updateError.message);
@@ -347,21 +333,9 @@ exports.createEventsBatch = async (event) => {
     
     let quote0Updated = false;
     try {
-      // Step 3: Query tomorrow's bin collections from database
-      const binCollections = await binCollectionDbService.getTomorrowCollections();
-      console.log(`Found ${binCollections.length} bin collections for tomorrow`);
-
-      // Step 4: Query today's events
-      const today = new Date().toISOString().split('T')[0];
-      const todayEvents = await dynamoDbService.getEventsByDate(today);
-      console.log(`Found ${todayEvents.length} events for today`);
-
-      // Step 5: Format display data
-      const displayData = displayFormatterService.formatDisplayFromDb(todayEvents, binCollections);
-      console.log('Display data formatted');
-
-      // Step 6: Push to Quote/0
-      await quote0ClientService.updateDisplay(displayData);
+      // Rebuild the dashboard (weather, 3 upcoming events, bin reminder) and push via Canvas API
+      const { results } = await dashboardService.refresh();
+      if (!Object.values(results).every(r => r.success)) throw new Error(JSON.stringify(results));
       console.log('Quote/0 updated successfully');
       quote0Updated = true;
     } catch (updateError) {
@@ -442,5 +416,243 @@ exports.scheduledUpdate = async (event) => {
         error: error.message
       })
     };
+  }
+};
+
+
+// ---------------------------------------------------------------------------
+// Weekly schedule endpoints
+// ---------------------------------------------------------------------------
+
+const scheduleDbService = require('../services/scheduleDbService');
+const quote0CanvasService = require('../services/quote0CanvasService');
+
+function json(statusCode, body) {
+  return {
+    statusCode,
+    headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+    body: JSON.stringify(body)
+  };
+}
+
+function parseBody(event) {
+  try {
+    return { body: event.body ? JSON.parse(event.body) : {} };
+  } catch (e) {
+    return { error: json(400, { error: 'Bad Request', message: 'Invalid JSON in request body' }) };
+  }
+}
+
+// Validate { time: "1500-1530", task: "..." } list; returns error string or null
+function validateItems(items, label) {
+  if (!Array.isArray(items)) return `${label}: must be an array`;
+  if (items.length > 20) return `${label}: maximum 20 items per day`;
+  for (const [i, it] of items.entries()) {
+    if (!it || typeof it.time !== 'string' || typeof it.task !== 'string' || !it.time || !it.task) {
+      return `${label}[${i}]: requires string fields 'time' and 'task'`;
+    }
+    if (!/^\d{4}-\d{4}$/.test(it.time)) return `${label}[${i}]: time must look like 1500-1530`;
+    if (it.task.length > 60) return `${label}[${i}]: task exceeds 60 characters`;
+  }
+  return null;
+}
+
+// Choose up to `max` rows: start at the first item that has not finished yet (end > now),
+// and if fewer than `max` remain, back-fill with the preceding items so the screen stays full.
+function selectRows(items, nowHHMM, max) {
+  const sorted = [...items].sort((a, b) => a.time.localeCompare(b.time));
+  let start = sorted.findIndex(it => it.time.split('-')[1] > nowHHMM);
+  if (start === -1) start = Math.max(0, sorted.length - max); // day is over: show the last rows
+  start = Math.max(0, Math.min(start, sorted.length - max));
+  return sorted.slice(start, start + max);
+}
+
+/**
+ * POST /api/schedule
+ * Body: { "monday": [{ "time": "1500-1530", "task": "tidy up lunch bag" }], ..., "sunday": [...] }
+ * Days omitted are left unchanged; send [] to clear a day.
+ */
+exports.saveSchedule = async (event) => {
+  const authError = authorize(event);
+  if (authError) return authError;
+
+  const { body, error } = parseBody(event);
+  if (error) return error;
+
+  const schedule = body.schedule || body;
+  const provided = scheduleDbService.days.filter(d => schedule[d] !== undefined);
+  if (provided.length === 0) {
+    return json(400, { error: 'Bad Request', message: 'Provide at least one day: ' + scheduleDbService.days.join(', ') });
+  }
+
+  const errors = provided.map(d => validateItems(schedule[d], d)).filter(Boolean);
+  if (errors.length) return json(422, { error: 'Unprocessable Entity', errors });
+
+  try {
+    const saved = await scheduleDbService.saveSchedule(schedule);
+    return json(201, { message: 'Schedule saved', days: saved });
+  } catch (e) {
+    console.error('[POST /api/schedule] Error:', e);
+    return json(500, { error: 'Internal server error', message: e.message });
+  }
+};
+
+/**
+ * GET /api/schedule            -> whole week
+ * GET /api/schedule?day=monday -> single day
+ */
+exports.getSchedule = async (event) => {
+  const authError = authorize(event);
+  if (authError) return authError;
+
+  try {
+    const day = event.queryStringParameters?.day?.toLowerCase();
+    if (day) {
+      if (!scheduleDbService.days.includes(day)) {
+        return json(400, { error: 'Bad Request', message: 'day must be one of: ' + scheduleDbService.days.join(', ') });
+      }
+      return json(200, { day, items: await scheduleDbService.getDay(day) });
+    }
+    return json(200, { schedule: await scheduleDbService.getWeek() });
+  } catch (e) {
+    console.error('[GET /api/schedule] Error:', e);
+    return json(500, { error: 'Internal server error', message: e.message });
+  }
+};
+
+// Returns a 400 response if `devices` is not an array of known device serial numbers, else null
+function validateDevices(devices) {
+  const serials = quote0CanvasService.deviceSerials().map(s => s.toUpperCase());
+  const isKnown = d => d === 1 || d === 2 || serials.includes(String(d).toUpperCase());
+  if (!Array.isArray(devices) || devices.length === 0 || !devices.every(isKnown)) {
+    return json(400, {
+      error: 'Bad Request',
+      message: `devices must be an array of device serial numbers: ${serials.join(', ')}`
+    });
+  }
+  return null;
+}
+
+/**
+ * POST /api/events/publish
+ * Rebuilds the dashboard (weather, next 3 events from today, tomorrow's bin) and pushes it to
+ * Quote/0 via the Canvas API without creating any event.
+ * Body (required): { "devices": ["48F6EE55503C"] } - device serial numbers; 400 if missing.
+ */
+exports.publishEvents = async (event) => {
+  const authError = authorize(event);
+  if (authError) return authError;
+
+  const { body, error } = parseBody(event);
+  if (error) return error;
+
+  const devices = body.devices;
+  if (devices === undefined) {
+    return json(400, {
+      error: 'Bad Request',
+      message: `Missing required field: devices (array of device serial numbers: ${quote0CanvasService.deviceSerials().join(', ')})`
+    });
+  }
+  const devicesError = validateDevices(devices);
+  if (devicesError) return devicesError;
+
+  try {
+    const { data, results } = await dashboardService.refresh(undefined, devices);
+    const allOk = Object.values(results).every(r => r.success);
+    return json(allOk ? 200 : 502, { dashboard: data, results });
+  } catch (e) {
+    console.error('[POST /api/events/publish] Error:', e);
+    return json(500, { error: 'Internal server error', message: e.message });
+  }
+};
+/**
+ * POST /api/schedule/publish
+ * Body (all optional): { "date": "2026-11-20", "day": "friday", "devices": [1, 2] }
+ * Defaults to today (Europe/London) and the schedule device (SCHEDULE_DEVICE). Pushes date + 2-column table to Canvas API.
+ */
+exports.publishSchedule = async (event) => {
+  const authError = authorize(event);
+  if (authError) return authError;
+
+  const { body, error } = parseBody(event);
+  if (error) return error;
+
+  try {
+    let date = body.date ? String(body.date).replace(/\//g, '-') : null;
+    if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return json(400, { error: 'Bad Request', message: 'Invalid date format. Use YYYY/MM/DD or YYYY-MM-DD' });
+    }
+    if (!date) {
+      date = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+    }
+
+    let day = body.day ? String(body.day).toLowerCase() : null;
+    if (!day) {
+      day = new Date(`${date}T12:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }).toLowerCase();
+    }
+    if (!scheduleDbService.days.includes(day)) {
+      return json(400, { error: 'Bad Request', message: 'day must be one of: ' + scheduleDbService.days.join(', ') });
+    }
+
+    const devices = body.devices || [quote0CanvasService.scheduleDevice()];
+    const devicesError = validateDevices(devices);
+    if (devicesError) return devicesError;
+
+    const items = await scheduleDbService.getDay(day);
+    if (items.length === 0) {
+      return json(404, { error: 'Not Found', message: `No schedule saved for ${day}` });
+    }
+
+    // Pick the 4 rows to show: the current/next item and the ones after it.
+    // `time` (HHMM or HH:MM) overrides "now" for testing; a non-today `date` starts from the first item.
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Europe/London', hour: '2-digit', minute: '2-digit', hour12: false
+    }).format(new Date()).split(':');
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/London' }).format(new Date());
+    let nowHHMM = parts.join('');
+    let displayHHMM = nowHHMM; // shown in the title row (real clock unless a "time" override is given)
+    if (body.time) {
+      nowHHMM = String(body.time).replace(':', '');
+      displayHHMM = nowHHMM;
+      if (!/^\d{4}$/.test(nowHHMM)) {
+        return json(400, { error: 'Bad Request', message: 'time must look like 1530 or 15:30' });
+      }
+    } else if (date !== today) {
+      nowHHMM = '0000';
+    }
+    const shown = selectRows(items, nowHHMM, 4);
+
+    const header = {
+      date,
+      time: `${displayHHMM.slice(0, 2)}:${displayHHMM.slice(2)}`,
+      weekday: day.charAt(0).toUpperCase() + day.slice(1)
+    };
+    const results = await quote0CanvasService.postSchedule(header, shown, devices);
+    const allOk = Object.values(results).every(r => r.success);
+
+    return json(allOk ? 200 : 502, { date, day, now: nowHHMM, shown, items, results });
+  } catch (e) {
+    console.error('[POST /api/schedule/publish] Error:', e);
+    return json(500, { error: 'Internal server error', message: e.message });
+  }
+};
+
+
+/**
+ * Hourly dashboard refresh
+ * Triggered by EventBridge every hour. Rebuilds the dashboard (weather, next 3 events,
+ * tomorrow's bin) from stored data and pushes it to the dashboard device (DASHBOARD_DEVICE).
+ * Unlike scheduledUpdate it does not call the Reading Council API.
+ */
+exports.scheduledPublishEvents = async (event) => {
+  console.log('[Hourly Dashboard] Triggered by EventBridge at', new Date().toISOString());
+  try {
+    const { data, results } = await dashboardService.refresh();
+    const success = Object.values(results).every(r => r.success);
+    console.log('[Hourly Dashboard] Result:', JSON.stringify({ success, results }));
+    return { statusCode: success ? 200 : 502, body: JSON.stringify({ success, dashboard: data, results }) };
+  } catch (error) {
+    console.error('[Hourly Dashboard] Fatal error:', error.message);
+    return { statusCode: 500, body: JSON.stringify({ success: false, error: error.message }) };
   }
 };

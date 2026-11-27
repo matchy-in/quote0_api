@@ -1,4 +1,4 @@
-# Quote0 API - Microservice Documentation
+﻿# Quote0 API - Microservice Documentation
 
 ## Overview
 
@@ -11,6 +11,7 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 - **Daily Scheduled Sync**: Automatic bin collection fetch and Quote/0 update at 01:10 UTC
 - **Bin Collection Storage**: Stores Reading Council bin data in DynamoDB for on-demand access
 - **Event Management**: iPhone app creates events (single or batch) and triggers immediate Quote/0 update
+- **Weekly Schedule**: Save a Monday-Sunday schedule, read it back, and post a day's date + table to two Quote/0 devices via the Canvas API
 - **API Authorization**: Bearer token authentication on all HTTP endpoints
 - **Quote/0 Display**: Formatted output (25 char header, 3x27 char lines, 29 char footer)
 - **Fully Serverless**: AWS Lambda + DynamoDB + EventBridge (no servers to manage)
@@ -62,6 +63,7 @@ A **serverless** microservice that **pushes** display updates to the Quote/0 rem
 3. [Scheduled Service](./03-scheduled-service.md) - Daily scheduled sync implementation
 4. [Implementation Guide](./04-implementation.md) - Step-by-step setup instructions
 5. [Deployment Guide](./05-deployment.md) - AWS Lambda deployment
+6. [Weekly Schedule & Canvas API](./06-weekly-schedule.md) - Monday-Sunday schedule and posting to two Quote/0 devices
 
 ## Quick Start
 
@@ -86,6 +88,8 @@ npm install
 # UPRN=310022781
 # QUOTE0_TEXT_API=your-quote0-endpoint
 # QUOTE0_AUTH_TOKEN=your-quote0-bearer-token
+# QUOTE0_CANVAS_1_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/canvas
+# QUOTE0_CANVAS_2_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/canvas
 # API_AUTH_TOKEN=your-secret-api-key
 
 # Deploy to AWS
@@ -105,9 +109,12 @@ All HTTP endpoints require `Authorization: Bearer <API_AUTH_TOKEN>` header.
 |--------|----------|-------------|
 | POST | `/api/events` | Create single event and update Quote/0 |
 | POST | `/api/events/batch` | Create multiple events and update Quote/0 |
+| POST | `/api/schedule` | Save weekly schedule (monday-sunday) |
+| GET | `/api/schedule` | Get weekly schedule (`?day=monday` for one day) |
+| POST | `/api/schedule/publish` | Post a day's schedule to Quote/0 Canvas API (by device serial number; default `48F6EE55503C`) |
 | POST | `/test/scheduled-update` | Manually trigger scheduled update (dev only) |
 
-**Note**: No GET endpoint - this is a push-only architecture!
+**Note**: Events are push-only; the only GET endpoint is `/api/schedule`. See [06-weekly-schedule.md](./06-weekly-schedule.md).
 
 ### Display Format
 
@@ -144,6 +151,11 @@ Additionally, creating events via the API triggers an immediate Quote/0 update.
 - **Purpose**: Store bin collection schedules from Reading API
 - **TTL**: Auto-delete 90 days after collection date
 
+### 3. schedule Table
+- **Primary Key**: `day` (`monday` ... `sunday`)
+- **Purpose**: Store the weekly schedule (`items`: list of `time` + `task`)
+- **TTL**: None
+
 ## Service Mapping
 
 Bin collection services are mapped to friendly names:
@@ -163,7 +175,7 @@ Bin collection services are mapped to friendly names:
 - Scheduled EventBridge triggers: No auth needed (internal)
 
 ### Outbound Authentication
-- Quote/0 Text API: `Authorization: Bearer <QUOTE0_AUTH_TOKEN>`
+- Quote/0 Text API and Canvas API: `Authorization: Bearer <QUOTE0_AUTH_TOKEN>`
 
 ## External Dependencies
 
@@ -172,7 +184,7 @@ Bin collection services are mapped to friendly names:
 
 ## Project Status
 
-- **Version**: 1.0.0
+- **Version**: 2.0.0
 - **Status**: Active Development
 - **Architecture**: Push-only (Serverless) with Bearer token auth
 

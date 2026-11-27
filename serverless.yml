@@ -1,6 +1,10 @@
-service: quote0-api
+﻿service: quote0-api
 
 frameworkVersion: '3'
+
+# Load variables from .env at deploy time so ${env:...} below resolves without
+# having to export them in the shell first.
+useDotenv: true
 
 provider:
   name: aws
@@ -8,19 +12,25 @@ provider:
   region: us-east-1
   stage: ${opt:stage, 'dev'}
   memorySize: 512
-  timeout: 30
+  timeout: 28
   
   environment:
     NODE_ENV: ${self:provider.stage}
     EVENTS_TABLE: ${self:service}-${self:provider.stage}-events
     BIN_COLLECTION_TABLE: ${self:service}-${self:provider.stage}-bin-collection
     UPRN: ${env:UPRN, '310022781'}
-    QUOTE0_TEXT_API: ${env:QUOTE0_TEXT_API, ''}
-    QUOTE0_AUTH_TOKEN: ${env:QUOTE0_AUTH_TOKEN, ''}
+    QUOTE0_TEXT_API: ${env:QUOTE0_TEXT_API, 'https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/text'}
+    QUOTE0_AUTH_TOKEN: ${env:QUOTE0_AUTH_TOKEN, 'dot_app_vIZLxXhUslczaOeikfAnIACvYZmHTUCprHVIioquiVIFYUKeEihDXRKkjCpdYrvi'}
+    SCHEDULE_TABLE: ${self:service}-${self:provider.stage}-schedule
+    QUOTE0_CANVAS_1_API: ${env:QUOTE0_CANVAS_1_API, 'https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/canvas'}
+    # Which device shows what (serial numbers): EventBridge/dashboard vs weekly schedule
+    DASHBOARD_DEVICE: ${env:DASHBOARD_DEVICE, '48F6EE543F1C'}
+    SCHEDULE_DEVICE: ${env:SCHEDULE_DEVICE, '48F6EE55503C'}
+    QUOTE0_CANVAS_2_API: ${env:QUOTE0_CANVAS_2_API, 'https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/canvas'}
     READING_API_URL: ${env:READING_API_URL, 'https://api.reading.gov.uk/api/collections'}
     READING_API_TIMEOUT: ${env:READING_API_TIMEOUT, '5000'}
     CACHE_TTL_HOURS: ${env:CACHE_TTL_HOURS, '12'}
-    API_AUTH_TOKEN: ${env:API_AUTH_TOKEN, ''}
+    API_AUTH_TOKEN: ${env:API_AUTH_TOKEN, 'some-long-random-secret-string'}
   
   iam:
     role:
@@ -39,6 +49,7 @@ provider:
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.EVENTS_TABLE}/index/*"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BIN_COLLECTION_TABLE}"
             - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.BIN_COLLECTION_TABLE}/index/*"
+            - "arn:aws:dynamodb:${self:provider.region}:*:table/${self:provider.environment.SCHEDULE_TABLE}"
         # CloudWatch Logs permissions
         - Effect: Allow
           Action:
@@ -63,7 +74,7 @@ functions:
   createEvent:
     handler: src/lambda/handlers.createEvent
     description: Create a new event and update Quote/0 display
-    timeout: 60
+    timeout: 28
     events:
       - httpApi:
           path: /api/events
@@ -73,10 +84,48 @@ functions:
   createEventsBatch:
     handler: src/lambda/handlers.createEventsBatch
     description: Create multiple events in batch and update Quote/0 display
-    timeout: 90
+    timeout: 28
     events:
       - httpApi:
           path: /api/events/batch
+          method: POST
+
+  # POST /api/events/publish - rebuild the dashboard and push it to Quote/0 (creates no event)
+  publishEvents:
+    handler: src/lambda/handlers.publishEvents
+    description: Rebuild and post the dashboard (weather, upcoming events, bin) to Quote/0
+    timeout: 28
+    events:
+      - httpApi:
+          path: /api/events/publish
+          method: POST
+
+  # POST /api/schedule - save weekly schedule (monday..sunday)
+  saveSchedule:
+    handler: src/lambda/handlers.saveSchedule
+    description: Save weekly schedule
+    events:
+      - httpApi:
+          path: /api/schedule
+          method: POST
+
+  # GET /api/schedule - get weekly schedule (?day=monday for one day)
+  getSchedule:
+    handler: src/lambda/handlers.getSchedule
+    description: Get weekly schedule
+    events:
+      - httpApi:
+          path: /api/schedule
+          method: GET
+
+  # POST /api/schedule/publish - push a day's schedule to Quote/0 Canvas API
+  publishSchedule:
+    handler: src/lambda/handlers.publishSchedule
+    description: Post a day's schedule to Quote/0 canvas devices
+    timeout: 28
+    events:
+      - httpApi:
+          path: /api/schedule/publish
           method: POST
 
   # Scheduled update - Fetch bins, store in DB, and push to Quote/0
@@ -90,6 +139,19 @@ functions:
           name: ${self:service}-${self:provider.stage}-schedule-0110
           description: Daily bin collection sync and Quote/0 update at 01:10 UTC
           rate: cron(10 1 * * ? *)
+          enabled: true
+
+  # Hourly dashboard refresh - weather, next 3 events, bin reminder (no Reading API call)
+  scheduledPublishEvents:
+    handler: src/lambda/handlers.scheduledPublishEvents
+    description: Rebuild and post the dashboard to Quote/0 every hour
+    timeout: 60
+    events:
+      # Every hour on the hour (UTC), every day
+      - schedule:
+          name: ${self:service}-${self:provider.stage}-publish-events-hourly
+          description: Hourly dashboard refresh on Quote/0
+          rate: cron(0 * * * ? *)
           enabled: true
 
 resources:
@@ -113,6 +175,24 @@ resources:
         TimeToLiveSpecification:
           Enabled: true
           AttributeName: ttl  # Auto-delete old events after 90 days
+        Tags:
+          - Key: Environment
+            Value: ${self:provider.stage}
+          - Key: Project
+            Value: quote0-api
+
+    # DynamoDB Weekly Schedule Table (one item per weekday)
+    ScheduleTable:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: ${self:provider.environment.SCHEDULE_TABLE}
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: day
+            AttributeType: S
+        KeySchema:
+          - AttributeName: day
+            KeyType: HASH
         Tags:
           - Key: Environment
             Value: ${self:provider.stage}

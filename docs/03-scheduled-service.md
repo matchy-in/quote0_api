@@ -1,4 +1,4 @@
-# Scheduled Service
+﻿# Scheduled Service
 
 ## Overview
 
@@ -526,3 +526,15 @@ curl -X POST http://localhost:3000/test/scheduled-update
 
 For implementation details, see [04-implementation.md](./04-implementation.md).  
 For deployment configuration, see [05-deployment.md](./05-deployment.md).
+
+---
+
+## Update: Canvas dashboard (v2)
+
+The scheduled update (and event creation) now ends with `dashboardService.refresh()` instead of the Text API: it posts to Quote/0 device `48F6EE543F1C` (`DASHBOARD_DEVICE`) via the Canvas API a title row (date + weather and max/min temperature from Open-Meteo), the next 3 upcoming events (`dynamoDbService.getUpcomingEvents`, next 30 days) and tomorrow's bin reminder. A weather failure does not block the update (the weather text is left blank). The result's `success` is false if the device post fails; see `metrics.pushResults`.
+
+
+### Hourly dashboard refresh
+
+A second EventBridge rule (`cron(0 * * * ? *)`, every hour on the hour in UTC, every day) runs `scheduledPublishEvents`. It calls `dashboardService.refresh()` to rebuild the dashboard (weather, next 3 events from today, tomorrow's bin reminder from stored data) and post it to `DASHBOARD_DEVICE` (`48F6EE543F1C`). It does not fetch the Reading Council API; that still happens only in the 01:10 UTC `scheduledUpdate`. Both jobs post to the same device.
+

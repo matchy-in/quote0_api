@@ -1,4 +1,4 @@
-# System Architecture
+﻿# System Architecture
 
 ## Overview
 
@@ -228,6 +228,12 @@ Billing Mode: PAY_PER_REQUEST (on-demand)
 - Handle connection errors
 - Retry logic for failed requests
 
+### 9. Weekly Schedule (Schedule DB + Quote/0 Canvas services)
+
+- `POST /api/schedule` / `GET /api/schedule`: save and read the Monday-Sunday schedule in the `schedule` table (`scheduleDbService`)
+- `POST /api/schedule/publish`: read one day and post date + two-column table to both Quote/0 devices through the Canvas API (`quote0CanvasService`)
+- Details: [06-weekly-schedule.md](./06-weekly-schedule.md)
+
 ## Data Flow
 
 ### Scheduled Update Flow
@@ -306,6 +312,7 @@ Return 201 Created with quote0_updated: true
 - **Amazon DynamoDB** (serverless, pay-per-request)
   - `events` table: User-created events
   - `bin_collection` table: Bin collection schedules
+  - `schedule` table: Weekly schedule (PK `day`, no TTL)
   - Auto-scaling and high availability
   - TTL for automatic data cleanup (90 days)
 
@@ -319,6 +326,7 @@ Return 201 Created with quote0_updated: true
 ### External APIs
 - **Reading Council API**: Public REST API (no auth required)
 - **Quote/0 Text API**: Device-specific endpoint (Bearer auth required)
+- **Quote/0 Canvas API**: One endpoint per device (`QUOTE0_CANVAS_1_API`, `QUOTE0_CANVAS_2_API`), used by the weekly schedule publish
 
 ## Deployment Architecture
 
@@ -386,7 +394,7 @@ Return 201 Created with quote0_updated: true
 - **Local dev**: Auth skipped if `API_AUTH_TOKEN` is empty
 
 ### Outbound Authentication
-- **Quote/0 Text API**: `Authorization: Bearer <QUOTE0_AUTH_TOKEN>`
+- **Quote/0 Text API and Canvas API**: `Authorization: Bearer <QUOTE0_AUTH_TOKEN>`
 
 ### Infrastructure Security
 - **IAM roles**: Minimal required permissions for Lambda

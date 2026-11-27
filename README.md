@@ -1,4 +1,4 @@
-# Quote0 API - Serverless Microservice
+﻿# Quote0 API - Serverless Microservice
 
 A serverless microservice that pushes upcoming events to a Quote/0 reminder device, with automatic bin collection schedule integration using AWS Lambda and DynamoDB.
 
@@ -32,6 +32,7 @@ npm run logs
 - **Bin Collection Integration** - Reading Council API with DynamoDB storage
 - **Event Management** - Create single or batch events via POST endpoints
 - **Quote/0 Display** - Push-only architecture via official Quote/0 Text API
+- **Weekly Schedule** - Save a Monday-Sunday schedule, read it back, and post a day's table to two Quote/0 devices via the Canvas API
 - **API Authorization** - Bearer token authentication on all HTTP endpoints
 - **Serverless** - AWS Lambda + DynamoDB (pay-per-use)
 - **Auto-Scaling** - Handles traffic spikes automatically
@@ -103,9 +104,60 @@ All HTTP endpoints require an `Authorization: Bearer <API_AUTH_TOKEN>` header.
 |--------|----------|-------------|
 | POST | `/api/events` | Create single event and update Quote/0 |
 | POST | `/api/events/batch` | Create multiple events (up to 100) and update Quote/0 |
+| POST | `/api/events/publish` | Rebuild the dashboard (weather, next 3 events, bin) and push it to Quote/0, without creating an event |
+| POST | `/api/schedule` | Save weekly schedule (`monday` to `sunday`) |
+| GET | `/api/schedule` | Get weekly schedule (`?day=monday` for a single day) |
+| POST | `/api/schedule/publish` | Post a day's schedule (date + 2-column table) to Quote/0 Canvas API |
 | POST | `/test/scheduled-update` | Manually trigger scheduled update (dev only) |
 
-**Note**: No GET endpoint. This is a push-only architecture.
+**Note**: Events are push-only. The only GET endpoint is `/api/schedule`.
+
+### Publish the Dashboard
+
+```bash
+curl -X POST https://YOUR-API-URL/api/events/publish \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{"devices":["48F6EE55503C"]}'
+```
+
+`devices` (device serial numbers) is required; a request without it returns `400`. It creates no event: it rebuilds the dashboard (weather, next 3 events, tomorrow's bin reminder) and pushes it. Returns `502` if a device fails. The response contains the `dashboard` data that was sent and per-device `results`.
+
+### Weekly Schedule
+
+Save (days omitted are left unchanged; send `[]` to clear a day; `time` must be `HHMM-HHMM`, max 20 items/day, task max 60 chars):
+
+```bash
+curl -X POST https://YOUR-API-URL/api/schedule \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{
+    "monday": [
+      {"time": "1500-1530", "task": "tidy up lunch bag"},
+      {"time": "1530-1600", "task": "TV + Snack"},
+      {"time": "1600-1730", "task": "Playtime"},
+      {"time": "1730-1800", "task": "Piano practice"}
+    ],
+    "tuesday": []
+  }'
+```
+
+Read:
+
+```bash
+curl https://YOUR-API-URL/api/schedule?day=monday -H "Authorization: Bearer YOUR_API_AUTH_TOKEN"
+```
+
+Publish to the devices (body optional; defaults to today in Europe/London and device `48F6EE55503C`; `devices` takes serial numbers):
+
+```bash
+curl -X POST https://YOUR-API-URL/api/schedule/publish \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{"date":"2026-11-20","devices":["48F6EE55503C"]}'
+```
+
+The Canvas screen has 5 rows: a title row (date and time, with the full weekday name at the far right) and 4 time/task rows: the current item and the next three (optional `"time":"1530"` in the body overrides "now" for testing). Returns `502` if any device fails; per-device results are in the response. Posts go to the device's loop list with `refreshNow: true` ([Canvas API docs](https://dot.mindreset.tech/docs/service/open/canvas_api)).
 
 ### Create a Single Event
 
@@ -163,6 +215,8 @@ quote0_api/
 │       ├── binCollectionService.js    # Reading Council API integration
 │       ├── displayFormatterService.js # Quote/0 display formatting
 │       ├── quote0ClientService.js     # Quote/0 device communication
+│       ├── quote0CanvasService.js     # Quote/0 Canvas API (schedule table)
+│       ├── scheduleDbService.js       # DynamoDB operations (weekly schedule)
 │       └── scheduledUpdateService.js  # Scheduled update orchestration
 └── docs/
     ├── README.md               # Documentation index
@@ -253,8 +307,11 @@ The service automatically pushes updates to Quote/0 at:
 | Time (UTC) | Purpose |
 |------------|---------|
 | 01:10 | Daily bin collection sync and display update |
+| Every hour (:00) | Dashboard refresh only (weather, next 3 events, bin reminder); no Reading API call |
 
 Additionally, creating events via `POST /api/events` or `POST /api/events/batch` triggers an immediate Quote/0 update.
+
+The update pushes a **dashboard** to Quote/0 device `48F6EE543F1C` (`DASHBOARD_DEVICE`) through the Canvas API: a title row with the date and today's weather on the right (Sunny/Cloudy/Rainy/Windy/..., max/min temperature, from [Open-Meteo](https://open-meteo.com), Reading by default; override with `WEATHER_LAT` / `WEATHER_LON`), the next 3 upcoming events from today onwards (today's events show the detail only; future events show `dd/mm` + detail), and tomorrow's bin reminder. Device `48F6EE55503C` (`SCHEDULE_DEVICE`) is used for the weekly schedule (`POST /api/schedule/publish` defaults to it). The EventBridge job (`scheduledUpdate`) updates `48F6EE543F1C`. Add a Canvas API item to each device's loop list in the Dot. app.
 
 **Note:** Time is in UTC. Adjust in `serverless.yml` for your timezone.
 
@@ -280,6 +337,8 @@ Additionally, creating events via `POST /api/events` or `POST /api/events/batch`
 | `UPRN` | Your property reference number | `310022781` |
 | `QUOTE0_TEXT_API` | Quote/0 device API endpoint | `https://dot.mindreset.tech/api/...` |
 | `QUOTE0_AUTH_TOKEN` | Bearer token for Quote/0 device API | `dot_app_...` |
+| `QUOTE0_CANVAS_1_API` | Canvas API endpoint, device 1 (schedule) | `https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/canvas` |
+| `QUOTE0_CANVAS_2_API` | Canvas API endpoint, device 2 (dashboard) | `https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/canvas` |
 | `API_AUTH_TOKEN` | Bearer token to protect your API endpoints | `your-secret-key` |
 | `READING_API_URL` | Reading Council API URL | `https://api.reading.gov.uk/api/collections` |
 | `READING_API_TIMEOUT` | API timeout in ms | `5000` |
@@ -293,14 +352,16 @@ Additionally, creating events via `POST /api/events` or `POST /api/events/batch`
 |-------|---------|-------------|
 | `events` | User-created events | `date` (HASH) + `id` (RANGE) |
 | `bin_collection` | Bin collection schedules | `date` (HASH) + `service` (RANGE) |
+| `schedule` | Weekly schedule, one item per weekday | `day` (HASH) |
 
-Both tables use TTL for auto-deletion after 90 days.
+`events` and `bin_collection` use TTL for auto-deletion after 90 days.
 
 ---
 
 ## Roadmap
 
-- [ ] Support multiple Quote/0 devices
+- [x] Support multiple Quote/0 devices (Canvas API, 2 devices)
+- [ ] Automatically publish the daily schedule on a timer
 - [ ] Web dashboard for event management
 - [ ] More external API integrations (weather, calendar)
 - [ ] Email/SMS notifications

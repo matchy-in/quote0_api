@@ -1,10 +1,15 @@
-# API Reference
+﻿# API Reference
 
 ## Overview
 
 Quote0 API provides **two endpoints** for creating events:
 - `POST /api/events` - Create a single event and **immediately update Quote/0 device**
 - `POST /api/events/batch` - Create multiple events at once and **immediately update Quote/0 device**
+
+and **three endpoints** for the weekly schedule (see [Weekly Schedule](#weekly-schedule) below and [06-weekly-schedule.md](./06-weekly-schedule.md)):
+- `POST /api/schedule` - Save the Monday-Sunday schedule
+- `GET /api/schedule` - Get the schedule (`?day=monday` for one day)
+- `POST /api/schedule/publish` - Post a day's schedule to the Quote/0 Canvas API (by device serial number)
 
 > **Architecture Note**: This is a **push-only** system. The Lambda function actively pushes updates to the Quote/0 device via the official Quote/0 Text API. The Quote/0 device does NOT call this API.
 
@@ -629,6 +634,58 @@ if ($response.failed -gt 0) {
     }
 }
 ```
+
+---
+
+## POST /api/events/publish
+
+Rebuilds the dashboard (weather, next 3 events from today, tomorrow's bin reminder) and pushes it to Quote/0 through the Canvas API without creating an event. Requires `Authorization: Bearer <API_AUTH_TOKEN>`.
+
+Body (required): `{"devices": ["48F6EE543F1C"]}` - device serial numbers. There is no default; a missing `devices` returns `400`.
+
+| Status | Meaning |
+|--------|---------|
+| 200 | Dashboard sent (`dashboard` data and per-device `results`) |
+| 502 | At least one device failed |
+| 400 | Invalid JSON, missing `devices`, or unknown device serial |
+
+---
+
+## Weekly Schedule
+
+All three endpoints require `Authorization: Bearer <API_AUTH_TOKEN>`.
+
+### POST /api/schedule
+
+Body: any of `monday` ... `sunday`, each a list of `{"time": "HHMM-HHMM", "task": "..."}` (max 20 items/day, task max 60 chars). Omitted days are unchanged; `[]` clears a day.
+
+```bash
+curl -X POST https://YOUR-API-URL/api/schedule \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_API_AUTH_TOKEN" \
+  -d '{"monday":[{"time":"1500-1530","task":"tidy up lunch bag"},{"time":"1530-1600","task":"TV + Snack"}]}'
+```
+
+| Status | Meaning |
+|--------|---------|
+| 201 | `{"message":"Schedule saved","days":["monday"]}` |
+| 400 | Invalid JSON or no day provided |
+| 422 | Validation errors (`errors` array) |
+
+### GET /api/schedule
+
+Returns `{"schedule": {"monday": [...], ...}}`, or `{"day": "monday", "items": [...]}` with `?day=monday` (`400` for an invalid day).
+
+### POST /api/schedule/publish
+
+Body (optional): `{"date": "2026-11-20", "day": "friday", "devices": ["48F6EE55503C"]}`. Defaults: today (Europe/London), that date's weekday, device `48F6EE55503C` (`SCHEDULE_DEVICE`). `devices` takes device serial numbers (from `QUOTE0_CANVAS_1_API` / `QUOTE0_CANVAS_2_API`); results are keyed by serial.
+
+| Status | Meaning |
+|--------|---------|
+| 200 | All devices updated |
+| 502 | At least one device failed; see per-device `results` |
+| 404 | No schedule saved for that day |
+| 400 | Invalid `date`, `day` or `devices` |
 
 ---
 

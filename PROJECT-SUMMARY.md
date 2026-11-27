@@ -1,4 +1,4 @@
-# Quote0 API - Complete Serverless Package
+﻿# Quote0 API - Complete Serverless Package
 
 ## What's Been Created
 
@@ -70,6 +70,9 @@ Create `.env` file:
 UPRN=310022781
 QUOTE0_TEXT_API=https://dot.mindreset.tech/api/authV2/open/device/YOUR_DEVICE_ID/text
 QUOTE0_AUTH_TOKEN=your_quote0_device_token
+# Quote/0 Canvas API (weekly schedule, 2 devices; uses QUOTE0_AUTH_TOKEN)
+QUOTE0_CANVAS_1_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/canvas
+QUOTE0_CANVAS_2_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/canvas
 API_AUTH_TOKEN=your-secret-api-key
 ```
 
@@ -91,7 +94,7 @@ npm run deploy:dev
 
 You'll get:
 - API Gateway URL
-- DynamoDB table names (events + bin_collection)
+- DynamoDB table names (events + bin_collection + schedule)
 - Lambda function ARNs
 - EventBridge rule configured (01:10 UTC daily)
 
@@ -210,6 +213,7 @@ After deployment, verify:
 | **Quick deployment** | [QUICKSTART.md](./QUICKSTART.md) |
 | **System architecture** | [docs/01-architecture.md](./docs/01-architecture.md) |
 | **API endpoints** | [docs/02-api-reference.md](./docs/02-api-reference.md) |
+| **Weekly schedule & Canvas API** | [docs/06-weekly-schedule.md](./docs/06-weekly-schedule.md) |
 | **Batch events** | [BATCH-EVENTS-GUIDE.md](./BATCH-EVENTS-GUIDE.md) |
 | **Scheduled service** | [docs/03-scheduled-service.md](./docs/03-scheduled-service.md) |
 | **Development guide** | [docs/04-implementation.md](./docs/04-implementation.md) |
@@ -222,7 +226,7 @@ After deployment, verify:
 
 ### AWS Services
 - **Lambda** - Serverless compute
-- **DynamoDB** - NoSQL database (events + bin_collection tables)
+- **DynamoDB** - NoSQL database (events + bin_collection + schedule tables)
 - **EventBridge** - Cron scheduling
 - **API Gateway** - HTTP API
 - **CloudWatch** - Logging and monitoring

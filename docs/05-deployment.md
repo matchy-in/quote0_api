@@ -1,4 +1,4 @@
-# Deployment Guide
+﻿# Deployment Guide
 
 ## Overview
 
@@ -37,6 +37,9 @@ Create `.env` file with your configuration:
 # Quote/0 Device
 QUOTE0_TEXT_API=https://dot.mindreset.tech/api/authV2/open/device/YOUR_DEVICE_ID/text
 QUOTE0_AUTH_TOKEN=your_quote0_bearer_token
+# Quote/0 Canvas API (weekly schedule, 2 devices; uses QUOTE0_AUTH_TOKEN)
+QUOTE0_CANVAS_1_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/canvas
+QUOTE0_CANVAS_2_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/canvas
 
 # API Authorization
 API_AUTH_TOKEN=your-secret-api-key
@@ -362,3 +365,10 @@ Before deploying to production:
 
 For implementation details, see [04-implementation.md](./04-implementation.md).
 For API documentation, see [02-api-reference.md](./02-api-reference.md).
+
+---
+
+## Environment variables at deploy time
+
+`serverless.yml` sets `useDotenv: true`, so `npm run deploy:dev` / `deploy:prod` read values from `.env` (e.g. `QUOTE0_AUTH_TOKEN`, `API_AUTH_TOKEN`). Each deploy replaces the Lambda environment with the resolved values, so a variable missing from `.env` (and from the shell) becomes empty. Check with `npx serverless print --stage dev`.
+

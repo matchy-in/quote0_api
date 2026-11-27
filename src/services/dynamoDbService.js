@@ -63,6 +63,30 @@ class DynamoDbService {
   }
 
   /**
+   * Get the next events starting from a date (inclusive), in date order.
+   * @param {string} fromDate - YYYY-MM-DD
+   * @param {number} limit - max events to return
+   * @param {number} days - how many days ahead to look
+   * @returns {Promise<Array<{date: string, event: string}>>}
+   */
+  async getUpcomingEvents(fromDate, limit = 3, days = 30) {
+    const dates = [];
+    const start = new Date(`${fromDate}T12:00:00Z`);
+    for (let i = 0; i < days; i++) {
+      const d = new Date(start);
+      d.setUTCDate(d.getUTCDate() + i);
+      dates.push(d.toISOString().split('T')[0]);
+    }
+
+    const perDay = await Promise.all(dates.map(date => this.getEventsByDate(date)));
+    const events = [];
+    perDay.forEach((items, i) => {
+      for (const item of items) events.push({ date: dates[i], event: item.event });
+    });
+    return events.slice(0, limit);
+  }
+
+  /**
    * Create a new event
    * @param {string} date - Date in YYYY-MM-DD format
    * @param {string} eventText - Event description

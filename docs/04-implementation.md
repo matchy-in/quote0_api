@@ -1,4 +1,4 @@
-# Implementation Guide
+﻿# Implementation Guide
 
 ## Overview
 
@@ -74,6 +74,9 @@ UPRN=310022781
 # Quote/0 Device API
 QUOTE0_TEXT_API=https://dot.mindreset.tech/api/authV2/open/device/YOUR_DEVICE_ID/text
 QUOTE0_AUTH_TOKEN=your_quote0_bearer_token
+# Quote/0 Canvas API (weekly schedule, 2 devices; uses QUOTE0_AUTH_TOKEN)
+QUOTE0_CANVAS_1_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/canvas
+QUOTE0_CANVAS_2_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/canvas
 
 # API Authorization (protects your endpoints)
 API_AUTH_TOKEN=your-secret-api-key

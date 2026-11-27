@@ -1,4 +1,4 @@
-# Quote/0 Device Setup Guide
+﻿# Quote/0 Device Setup Guide
 
 ## ✅ Changes Made
 
@@ -52,6 +52,9 @@ QUOTE0_TEXT_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/t
 
 # Quote/0 Bearer Token
 QUOTE0_AUTH_TOKEN=dot_app_vIZLxXhUslczaOeikfAnIACvYZmHTUCprHVIioquiVIFYUKeEihDXRKkjCpdYrvi
+# Quote/0 Canvas API (weekly schedule, 2 devices; uses QUOTE0_AUTH_TOKEN)
+QUOTE0_CANVAS_1_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE55503C/canvas
+QUOTE0_CANVAS_2_API=https://dot.mindreset.tech/api/authV2/open/device/48F6EE543F1C/canvas
 
 # Reading Council API Configuration
 READING_API_URL=https://api.reading.gov.uk/api/collections
